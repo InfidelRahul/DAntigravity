@@ -33,7 +33,7 @@ object RuntimeDiagnostics {
             rootfsInfo = collectRootfsInfo(paths),
             pruntimeInfo = collectPRootInfo(paths),
             linuxInfo = collectLinuxInfo(paths),
-            vscodeInfo = collectVsCodeInfo(paths),
+            antigravityInfo = collectAntigravityInfo(paths),
             networkInfo = collectNetworkInfo(context),
             logEntries = AvsLogger.logs.value.takeLast(100)
         )
@@ -60,7 +60,7 @@ object RuntimeDiagnostics {
         val internalDir = context?.filesDir ?: File("/data/data/com.avscode/files")
         val appFilesDir = internalDir
         val rootfsDir = paths?.rootfsDir ?: File(appFilesDir, "ubuntu-rootfs")
-        val vsCodeCliBinary = paths?.hostVsCodeCliBin ?: File(rootfsDir, "usr/local/bin/code")
+        val antigravityBinary = paths?.hostAntigravityBin ?: File(rootfsDir, "usr/local/bin/agy")
 
         return StorageInfo(
             externalStorageTotal = externalDir.totalSpace,
@@ -71,7 +71,7 @@ object RuntimeDiagnostics {
             appFilesDirExists = appFilesDir.exists(),
             appFilesDirCanWrite = appFilesDir.canWrite(),
             rootfsInstalled = paths?.rootfsInstallMarker?.exists() ?: File(rootfsDir, ".installed").exists(),
-            vsCodeCliInstalled = vsCodeCliBinary.exists()
+            antigravityInstalled = antigravityBinary.exists()
         )
     }
 
@@ -141,18 +141,18 @@ object RuntimeDiagnostics {
         )
     }
 
-    private fun collectVsCodeInfo(paths: AppPaths?): VsCodeInfo {
+    private fun collectAntigravityInfo(paths: AppPaths?): AntigravityInfo {
         val rootfsDir = paths?.rootfsDir ?: File("/data/data/com.avscode/files/ubuntu-rootfs")
-        val cliBinary = paths?.hostVsCodeCliBin ?: File(rootfsDir, "usr/local/bin/code")
-        val userDataDir = paths?.hostVsCodeDataDir ?: File(rootfsDir, "home/user/.vscode-cli")
+        val cliBinary = paths?.hostAntigravityBin ?: File(rootfsDir, "usr/local/bin/agy")
+        val userDataDir = paths?.hostAntigravityDataDir ?: File(rootfsDir, "home/user/.gemini")
 
-        return VsCodeInfo(
+        return AntigravityInfo(
             installed = cliBinary.exists(),
             binaryExists = cliBinary.exists(),
             binaryCanExecute = cliBinary.canExecute(),
             userDataDirExists = userDataDir.exists(),
             installPath = cliBinary.absolutePath,
-            version = "Microsoft VS Code CLI"
+            version = "Antigravity CLI (agy)"
         )
     }
 
@@ -192,7 +192,7 @@ object RuntimeDiagnostics {
     fun exportToText(report: DiagnosticsReport): String {
         val sb = StringBuilder()
 
-        sb.appendLine("=== AVSCode Diagnostics Report ===")
+        sb.appendLine("=== DroidAntigravity Diagnostics Report ===")
         sb.appendLine("Timestamp: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(report.timestamp))}")
         sb.appendLine()
 
@@ -216,7 +216,7 @@ object RuntimeDiagnostics {
         sb.appendLine("App Files Dir Exists: ${report.storageInfo.appFilesDirExists}")
         sb.appendLine("App Files Dir Writable: ${report.storageInfo.appFilesDirCanWrite}")
         sb.appendLine("Rootfs Installed: ${report.storageInfo.rootfsInstalled}")
-        sb.appendLine("VS Code CLI Installed: ${report.storageInfo.vsCodeCliInstalled}")
+        sb.appendLine("Antigravity CLI Installed: ${report.storageInfo.antigravityInstalled}")
         sb.appendLine()
 
         sb.appendLine("--- Rootfs Info ---")
@@ -246,13 +246,13 @@ object RuntimeDiagnostics {
         sb.appendLine("Home User Exists: ${report.linuxInfo.homeUserExists}")
         sb.appendLine()
 
-        sb.appendLine("--- VS Code Server Info ---")
-        sb.appendLine("Installed: ${report.vscodeInfo.installed}")
-        sb.appendLine("Binary Exists: ${report.vscodeInfo.binaryExists}")
-        sb.appendLine("Binary Executable: ${report.vscodeInfo.binaryCanExecute}")
-        sb.appendLine("User Data Dir Exists: ${report.vscodeInfo.userDataDirExists}")
-        sb.appendLine("Install Path: ${report.vscodeInfo.installPath}")
-        sb.appendLine("Version: ${report.vscodeInfo.version ?: "Unknown"}")
+        sb.appendLine("--- Antigravity Info ---")
+        sb.appendLine("Installed: ${report.antigravityInfo.installed}")
+        sb.appendLine("Binary Exists: ${report.antigravityInfo.binaryExists}")
+        sb.appendLine("Binary Executable: ${report.antigravityInfo.binaryCanExecute}")
+        sb.appendLine("User Data Dir Exists: ${report.antigravityInfo.userDataDirExists}")
+        sb.appendLine("Install Path: ${report.antigravityInfo.installPath}")
+        sb.appendLine("Version: ${report.antigravityInfo.version ?: "Unknown"}")
         sb.appendLine()
 
         sb.appendLine("--- Network Info ---")
@@ -292,10 +292,12 @@ data class DiagnosticsReport(
     val rootfsInfo: RootfsInfo,
     val pruntimeInfo: PRootInfo,
     val linuxInfo: LinuxInfo,
-    val vscodeInfo: VsCodeInfo,
+    val antigravityInfo: AntigravityInfo,
     val networkInfo: NetworkInfo,
     val logEntries: List<AvsLogger.LogEntry>
-)
+) {
+    val vscodeInfo: AntigravityInfo get() = antigravityInfo
+}
 
 data class AndroidInfo(
     val sdkVersion: Int,
@@ -319,9 +321,10 @@ data class StorageInfo(
     val appFilesDirExists: Boolean,
     val appFilesDirCanWrite: Boolean,
     val rootfsInstalled: Boolean,
-    val vsCodeCliInstalled: Boolean
+    val antigravityInstalled: Boolean
 ) {
-    val codeServerInstalled: Boolean get() = vsCodeCliInstalled
+    val vsCodeCliInstalled: Boolean get() = antigravityInstalled
+    val codeServerInstalled: Boolean get() = antigravityInstalled
 }
 
 data class RootfsInfo(
@@ -349,7 +352,7 @@ data class LinuxInfo(
     val homeUserExists: Boolean
 )
 
-data class VsCodeInfo(
+data class AntigravityInfo(
     val installed: Boolean,
     val binaryExists: Boolean,
     val binaryCanExecute: Boolean,
@@ -357,6 +360,8 @@ data class VsCodeInfo(
     val installPath: String,
     val version: String?
 )
+
+typealias VsCodeInfo = AntigravityInfo
 
 data class NetworkInfo(
     val hasInternetPermission: Boolean,

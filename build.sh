@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AVSCode Build Script (VS Code for Android)
+# DroidAntigravity Build Script
 # Builds LinuxDroid PRoot runtime and Android APK (Debug / Release)
 # ==============================================================================
 
@@ -17,7 +17,7 @@ if [[ "$BUILD_TYPE" != "debug" && "$BUILD_TYPE" != "release" ]]; then
 fi
 
 echo "=========================================="
-echo " Building AVSCode ($BUILD_TYPE)"
+echo " Building DroidAntigravity ($BUILD_TYPE)"
 echo "=========================================="
 
 # 1. Check Submodules

@@ -82,7 +82,7 @@ class LinuxRuntimeService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     private fun startForegroundWithNotification() {
-        val notification = createNotification("AVSCode Linux userspace active")
+        val notification = createNotification("DroidAntigravity Linux userspace active")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
@@ -109,16 +109,16 @@ class LinuxRuntimeService : Service() {
                     is AppState.VerifyingLinux -> "Verifying Linux guest userspace..."
                     is AppState.LinuxReady -> "Linux guest userspace active"
                     is AppState.InstallingPackages -> state.status
-                    is AppState.InstallingVsCode -> "Installing VS Code CLI: ${(state.progress * 100).toInt()}%"
-                    is AppState.VsCodeReady -> "VS Code CLI ready"
+                    is AppState.InstallingAntigravity -> "Installing Antigravity: ${(state.progress * 100).toInt()}%"
+                    is AppState.AntigravityReady -> "Antigravity ready"
                     is AppState.StartingAuthBridge -> state.status
-                    is AppState.StartingVsCodeServer -> state.status
-                    is AppState.Ready -> "VS Code active at ${state.url}"
+                    is AppState.StartingAntigravityServer -> state.status
+                    is AppState.Ready -> "Active at ${state.url}"
                     is AppState.Stopping -> "Stopping Linux userspace..."
                     is AppState.RootfsFailed -> "Rootfs error: ${state.message}"
                     is AppState.LinuxFailed -> "Linux error: ${state.message}"
                     is AppState.PackageInstallFailed -> "Package error: ${state.message}"
-                    is AppState.VsCodeFailed -> "VS Code error: ${state.message}"
+                    is AppState.AntigravityFailed -> "Antigravity error: ${state.message}"
                     is AppState.Failed -> "Linux runtime error: ${state.message}"
                 }
                 updateNotification(text)

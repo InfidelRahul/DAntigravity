@@ -28,11 +28,11 @@ dependencyResolutionManagement {
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
-rootProject.name = "AVscode"
+rootProject.name = "DroidAntigravity"
 include(":app")
 include(":core")
 include(":runtime")
 include(":rootfs")
-include(":vscode")
+include(":antigravity")
 include(":web")
 include(":diagnostics")

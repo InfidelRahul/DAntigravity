@@ -113,12 +113,22 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Card 1: Primary VS Code Server & Editor -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/card_vscode"
+            <!-- Section 1: LOCAL (LinuxDroid) -->
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="14dp"
+                android:text="@string/local_title"
+                android:textColor="@color/accent"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:layout_marginBottom="6dp" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/card_local"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
                 app:cardBackgroundColor="@color/surface_color"
                 app:cardCornerRadius="14dp"
                 app:cardElevation="1dp"
@@ -140,8 +150,8 @@
                         <ImageView
                             android:layout_width="32dp"
                             android:layout_height="32dp"
-                            android:contentDescription="@string/vscode_card_title"
-                            android:src="@drawable/ic_vscode" />
+                            android:contentDescription="@string/local_card_title"
+                            android:src="@drawable/ic_launcher_foreground" />
 
                         <LinearLayout
                             android:layout_width="0dp"
@@ -153,23 +163,23 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="@string/vscode_card_title"
+                                android:text="@string/local_card_title"
                                 android:textColor="@color/text_primary"
                                 android:textSize="16sp"
                                 android:textStyle="bold" />
 
                             <TextView
-                                android:id="@+id/tv_vscode_status_desc"
+                                android:id="@+id/tv_local_status_desc"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="@string/vscode_status_stopped"
+                                android:text="@string/local_card_subtitle"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="13sp" />
                         </LinearLayout>
 
                         <ImageView
-                            android:id="@+id/iv_vscode_status_dot"
+                            android:id="@+id/iv_local_status_dot"
                             android:layout_width="16dp"
                             android:layout_height="16dp"
                             android:contentDescription="Status indicator"
@@ -178,7 +188,7 @@
                     </LinearLayout>
 
                     <ProgressBar
-                        android:id="@+id/pb_vscode_starting"
+                        android:id="@+id/pb_local_starting"
                         style="?android:attr/progressBarStyleHorizontal"
                         android:layout_width="match_parent"
                         android:layout_height="4dp"
@@ -193,27 +203,166 @@
                         android:orientation="horizontal">
 
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_vscode_action"
+                            android:id="@+id/btn_local_action"
                             android:layout_width="0dp"
-                            android:layout_height="48dp"
+                            android:layout_height="46dp"
                             android:layout_weight="1"
-                            android:text="@string/start_vscode"
+                            android:text="@string/open_local"
                             android:textSize="14sp"
+                            android:textStyle="bold"
                             app:cornerRadius="10dp"
                             app:icon="@drawable/ic_play_arrow"
                             app:iconGravity="textStart" />
 
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_vscode_stop"
+                            android:id="@+id/btn_local_stop"
                             style="@style/Widget.Material3.Button.TonalButton"
                             android:layout_width="wrap_content"
-                            android:layout_height="48dp"
+                            android:layout_height="46dp"
                             android:layout_marginStart="8dp"
-                            android:text="@string/stop_vscode"
-                            android:textSize="13sp"
+                            android:text="@string/stop_local"
+                            android:textSize="12sp"
                             app:cornerRadius="10dp"
                             android:visibility="gone" />
                     </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Section 2: CODESPACES -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/codespaces_title"
+                android:textColor="@color/accent"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:layout_marginBottom="6dp" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/card_codespaces"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="@color/surface_color"
+                app:cardCornerRadius="14dp"
+                app:cardElevation="1dp"
+                app:strokeColor="@color/card_stroke"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/codespaces_title"
+                                android:textColor="@color/text_primary"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_codespaces_status"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="@string/codespaces_subtitle"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_auth_github"
+                            style="@style/Widget.Material3.Button.IconButton"
+                            android:layout_width="38dp"
+                            android:layout_height="38dp"
+                            android:contentDescription="GitHub Auth"
+                            app:icon="@drawable/ic_settings"
+                            app:iconTint="@color/text_primary" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_refresh_codespaces"
+                            style="@style/Widget.Material3.Button.IconButton"
+                            android:layout_width="38dp"
+                            android:layout_height="38dp"
+                            android:contentDescription="Refresh Codespaces"
+                            app:icon="@drawable/ic_refresh"
+                            app:iconTint="@color/text_primary" />
+                    </LinearLayout>
+
+                    <ProgressBar
+                        android:id="@+id/pb_codespaces_loading"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="4dp"
+                        android:layout_marginTop="10dp"
+                        android:indeterminate="true"
+                        android:visibility="gone" />
+
+                    <!-- Dynamic list of codespace items -->
+                    <LinearLayout
+                        android:id="@+id/layout_codespaces_items"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="vertical" />
+
+                    <!-- Empty / Not logged in banner -->
+                    <LinearLayout
+                        android:id="@+id/layout_codespaces_empty"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:gravity="center"
+                        android:orientation="vertical"
+                        android:padding="12dp"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:id="@+id/tv_codespaces_empty_msg"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:gravity="center"
+                            android:text="@string/github_auth_required"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_codespaces_login"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/github_login"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <!-- New Codespace Button -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_new_codespace"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="44dp"
+                        android:layout_marginTop="10dp"
+                        android:text="@string/new_codespace"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        app:cornerRadius="10dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -570,15 +719,15 @@
                             <TextView
                                 android:layout_width="120dp"
                                 android:layout_height="wrap_content"
-                                android:text="@string/vscode_cli_label"
+                                android:text="@string/antigravity_cli_label"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp" />
                             <TextView
-                                android:id="@+id/tv_about_vscode"
+                                android:id="@+id/tv_about_antigravity"
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="VS Code CLI (ARM64)"
+                                android:text="Antigravity CLI (ARM64)"
                                 android:textColor="@color/text_primary"
                                 android:textSize="12sp" />
                         </LinearLayout>
@@ -749,7 +898,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:background="@color/vscode_background"
+            android:background="@color/editor_background"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingHorizontal="8dp">
@@ -785,7 +934,7 @@
                 android:gravity="center"
                 android:singleLine="true"
                 android:ellipsize="middle"
-                android:text="@string/vscode_card_title"
+                android:text="@string/app_name"
                 android:textColor="#cccccc"
                 android:textSize="12sp" />
 
@@ -841,6 +990,17 @@
                 app:icon="@drawable/ic_desktop_windows"
                 app:iconSize="18dp"
                 app:iconTint="@color/accent" />
+
+            <!-- Reload Shortcut -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_editor_refresh"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:contentDescription="@string/refresh_codespaces"
+                app:icon="@drawable/ic_refresh"
+                app:iconSize="18dp"
+                app:iconTint="#ffffff" />
 
             <!-- Terminal Shortcut -->
             <com.google.android.material.button.MaterialButton

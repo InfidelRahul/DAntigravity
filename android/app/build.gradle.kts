@@ -84,7 +84,7 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":runtime"))
     implementation(project(":rootfs"))
-    implementation(project(":vscode"))
+    implementation(project(":antigravity"))
     implementation(project(":web"))
     implementation(project(":diagnostics"))
     

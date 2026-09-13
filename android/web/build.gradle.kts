@@ -34,7 +34,6 @@ android {
 
 dependencies {
     implementation(project(":core"))
-    implementation(project(":vscode"))
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")

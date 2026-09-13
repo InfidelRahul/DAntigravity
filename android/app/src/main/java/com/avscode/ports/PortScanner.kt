@@ -7,23 +7,26 @@ data class DiscoveredPort(
     val port: Int,
     val serviceName: String,
     val url: String,
-    val isPrimaryVsCode: Boolean = false
+    val isPrimaryServer: Boolean = false,
+    val isPrimaryVsCode: Boolean = isPrimaryServer
 )
 
 class PortScanner {
 
     fun scanPorts(
-        primaryVsCodePort: Int?,
+        primaryServerPort: Int? = null,
         authBridgePort: Int? = null,
         tcpProcFile: File = File("/proc/net/tcp"),
         tcp6ProcFile: File = File("/proc/net/tcp6"),
-        guestProcessMap: Map<Int, String> = emptyMap()
+        guestProcessMap: Map<Int, String> = emptyMap(),
+        primaryVsCodePort: Int? = primaryServerPort
     ): List<DiscoveredPort> {
         val listeningPorts = mutableSetOf<Int>()
+        val primary = primaryServerPort ?: primaryVsCodePort
 
-        // 1. Always include primary VS Code server port if available
-        if (primaryVsCodePort != null && primaryVsCodePort > 0) {
-            listeningPorts.add(primaryVsCodePort)
+        // 1. Always include primary server port if available
+        if (primary != null && primary > 0) {
+            listeningPorts.add(primary)
         }
 
         // 2. Parse /proc/net/tcp & /proc/net/tcp6
@@ -40,20 +43,21 @@ class PortScanner {
 
         // 5. Map into DiscoveredPort models with extension server identification
         return listeningPorts.sorted().map { port ->
-            val isPrimary = (port == primaryVsCodePort)
+            val isPrimary = (port == primary)
             val guestProc = guestProcessMap[port]
             val serviceName = resolveServiceName(port, isPrimary, guestProc)
             DiscoveredPort(
                 port = port,
                 serviceName = serviceName,
                 url = "http://127.0.0.1:$port",
+                isPrimaryServer = isPrimary,
                 isPrimaryVsCode = isPrimary
             )
         }
     }
 
     internal fun resolveServiceName(port: Int, isPrimary: Boolean, guestProcessName: String?): String {
-        if (isPrimary) return "VS Code Server"
+        if (isPrimary) return "Antigravity Server"
 
         val proc = guestProcessName?.lowercase()
         if (proc != null) {

@@ -54,7 +54,7 @@ class CoreTest {
         assertFalse(startingAuth.isFailed)
         assertTrue(startingAuth.canAccessCli)
 
-        val startingServer: AppState = AppState.StartingVsCodeServer("Starting local server...")
+        val startingServer: AppState = AppState.StartingAntigravityServer("Starting local server...")
         assertFalse(startingServer.isReady)
         assertFalse(startingServer.isFailed)
         assertTrue(startingServer.canAccessCli)
@@ -69,10 +69,10 @@ class CoreTest {
         assertTrue(failed.isFailed)
         assertEquals("Disk error", (failed as AppState.Failed).message)
 
-        val vscodeFailed: AppState = AppState.VsCodeFailed("Server crash")
-        assertTrue(vscodeFailed.isFailed)
-        assertTrue(vscodeFailed.canAccessCli) // CLI remains accessible on VS Code failure!
-        assertEquals("Server crash", (vscodeFailed as AppState.VsCodeFailed).message)
+        val agyFailed: AppState = AppState.AntigravityFailed("Server crash")
+        assertTrue(agyFailed.isFailed)
+        assertTrue(agyFailed.canAccessCli) // CLI remains accessible on Antigravity failure!
+        assertEquals("Server crash", (agyFailed as AppState.AntigravityFailed).message)
     }
 
     @Test

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">AVSCode</string>
-    <string name="app_tagline">VS Code for Android • Local Linux Runtime</string>
+    <string name="app_name">DroidAntigravity</string>
+    <string name="app_tagline">Antigravity for Android • Local Linux &amp; Cloud Codespaces</string>
     <string name="loading">Loading...</string>
     <string name="installing_linux">Installing Linux environment...</string>
     <string name="starting_linux">Starting Linux...</string>
-    <string name="starting_vscode">Starting VS Code Server...</string>
-    <string name="connecting">Connecting to VS Code...</string>
+    <string name="starting_antigravity">Starting Antigravity...</string>
+    <string name="connecting">Connecting to Antigravity...</string>
     <string name="error_title">Error</string>
     <string name="retry">Retry</string>
     <string name="cancel">Cancel</string>
@@ -14,31 +14,49 @@
     <string name="close">Close</string>
     <string name="runtime_not_installed">Linux environment not installed</string>
     <string name="runtime_start_failed">Failed to start Linux runtime</string>
-    <string name="vscode_server_failed">Failed to start VS Code Server</string>
-    <string name="connection_failed">Failed to connect to VS Code</string>
+    <string name="antigravity_server_failed">Failed to start Antigravity server</string>
+    <string name="connection_failed">Failed to connect to Antigravity</string>
     <string name="downloading_rootfs">Downloading Ubuntu rootfs...</string>
     <string name="extracting_rootfs">Extracting rootfs...</string>
     <string name="configuring_environment">Configuring development environment...</string>
     <string name="storage_access_title">Storage Access Required</string>
-    <string name="storage_access_desc">AVSCode requires storage access to download and maintain the Ubuntu Linux userspace, install developer toolchains, and store your coding workspace files.</string>
+    <string name="storage_access_desc">DroidAntigravity requires storage access to manage the Ubuntu Linux userspace, toolchains, and your project files.</string>
     <string name="grant_storage_access">Grant Storage Access &amp; Continue</string>
     <string name="toggle_terminal">Toggle Terminal</string>
     <string name="run_command">Run</string>
     <string name="dashboard">Dashboard</string>
     <string name="return_to_dashboard">Return to Dashboard</string>
 
-    <!-- VS Code Card -->
-    <string name="vscode_card_title">Visual Studio Code</string>
-    <string name="vscode_card_subtitle">Local Web Server &amp; Editor</string>
-    <string name="start_vscode">Start VS Code</string>
-    <string name="return_to_code">Return to Code</string>
-    <string name="stop_vscode">Stop VS Code</string>
-    <string name="stopping_vscode">Stopping VS Code...</string>
-    <string name="vscode_status_stopped">Server stopped</string>
-    <string name="vscode_status_running">Server active on %s</string>
-    <string name="vscode_status_starting">Starting VS Code server...</string>
-    <string name="vscode_status_stopping">Stopping VS Code server...</string>
-    <string name="vscode_status_failed">Failed to start server</string>
+    <!-- Local LinuxDroid Card -->
+    <string name="local_title">LOCAL</string>
+    <string name="local_card_title">LinuxDroid</string>
+    <string name="local_card_subtitle">Debian / Ubuntu PRoot</string>
+    <string name="open_local">OPEN</string>
+    <string name="start_local">START</string>
+    <string name="stop_local">Stop Antigravity</string>
+    <string name="stopping_antigravity">Stopping Antigravity...</string>
+    <string name="antigravity_status_stopped">Antigravity stopped</string>
+    <string name="antigravity_status_running">Active on %s</string>
+    <string name="antigravity_status_starting">Starting Antigravity server...</string>
+    <string name="antigravity_status_stopping">Stopping Antigravity server...</string>
+    <string name="antigravity_status_failed">Failed to start server</string>
+
+    <!-- GitHub Codespaces Card -->
+    <string name="codespaces_title">CODESPACES</string>
+    <string name="codespaces_subtitle">Remote GitHub cloud environments</string>
+    <string name="new_codespace">+ NEW CODESPACE</string>
+    <string name="refresh_codespaces">Refresh</string>
+    <string name="github_auth_required">GitHub authentication required</string>
+    <string name="github_login">Set GitHub Token</string>
+    <string name="github_token_hint">Personal Access Token (PAT)</string>
+    <string name="save_token">Save Token</string>
+    <string name="no_codespaces_found">No Codespaces found for this account</string>
+    <string name="codespace_running">Running</string>
+    <string name="codespace_stopped">Stopped</string>
+    <string name="codespace_starting">Starting...</string>
+    <string name="codespace_open">OPEN</string>
+    <string name="codespace_start">START</string>
+
     <string name="auth_title">Authentication</string>
     <string name="auth_complete_msg">Authentication complete! You may now close this window.</string>
 
@@ -68,18 +86,18 @@
     <string name="operation_failed">Operation failed: %s</string>
 
     <!-- About Section -->
-    <string name="about_title">About AVSCode</string>
+    <string name="about_title">About DroidAntigravity</string>
     <string name="about_subtitle">Environment &amp; Hardware Details</string>
-    <string name="app_version_label">AVSCode Version</string>
+    <string name="app_version_label">App Version</string>
     <string name="linux_distro_label">Linux Userspace</string>
-    <string name="vscode_cli_label">VS Code Engine</string>
+    <string name="antigravity_cli_label">Antigravity Engine</string>
     <string name="android_version_label">Android Host</string>
     <string name="device_model_label">Device Model</string>
     <string name="cpu_arch_label">CPU Architecture</string>
     <string name="kernel_label">Kernel</string>
     <string name="projects_path_label">Projects Path</string>
     <string name="settings_title">Settings</string>
-    <string name="clear_logs">Clear Server Logs</string>
+    <string name="clear_logs">Clear Logs</string>
     <string name="logs_cleared">Logs cleared</string>
 
     <!-- Zoom & Display Controls -->
@@ -98,8 +116,8 @@
     <string name="key_ctrl_c">^C</string>
     <string name="key_ctrl_x">^X</string>
     <string name="key_ctrl_o">^O</string>
-    <string name="key_clear">CLEAR</string>
-
-    <!-- Open Port Action -->
+    <string name="key_ctrl_k">^K</string>
+    <string name="key_ctrl_l">^L</string>
+    <string name="key_clear">Clear</string>
     <string name="open_service">Open</string>
 </resources>

@@ -31,14 +31,15 @@ class AppPaths(private val context: Context) {
     val guestProjectsPath: String = "/home/user/projects"
     val hostProjectsDir: File get() = File(rootfsDir, "home/user/projects")
 
-    // VS Code CLI paths inside guest
-    val guestVsCodeCliBin: String = "/usr/local/bin/code"
-    val guestVsCodeDataDir: String = "/home/user/.vscode-cli"
-    val hostVsCodeCliBin: File get() = File(rootfsDir, "usr/local/bin/code")
-    val hostVsCodeDataDir: File get() = File(rootfsDir, "home/user/.vscode-cli")
+    // Antigravity CLI paths inside guest
+    val guestAntigravityBin: String = "/usr/local/bin/agy"
+    val guestAntigravityDataDir: String = "/home/user/.gemini"
+    val hostAntigravityBin: File get() = File(rootfsDir, "usr/local/bin/agy")
+    val hostAntigravityDataDir: File get() = File(rootfsDir, "home/user/.gemini")
 
     // Log files
-    val serverLogFile: File get() = File(cacheDir, "vscode-server.log")
+    val serverLogFile: File get() = File(cacheDir, "antigravity.log")
+    val antigravityLogFile: File get() = File(cacheDir, "antigravity.log")
     val runtimeLogFile: File get() = File(cacheDir, "linux-runtime.log")
 
     // Guest Auth Bridge helper

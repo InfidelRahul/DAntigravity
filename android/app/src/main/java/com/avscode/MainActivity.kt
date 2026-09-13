@@ -28,12 +28,15 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.avscode.about.AboutInfoProvider
+import com.avscode.codespaces.CodespaceItem
+import com.avscode.core.CodespaceState
 import com.avscode.core.AppState
 import com.avscode.core.AvsLogger
+import com.avscode.core.Result
 import com.avscode.core.StoragePermissionHelper
 import com.avscode.ports.PortScanner
 import com.avscode.terminal.TerminalSession
-import com.avscode.web.VsCodeWebView
+import com.avscode.web.AntigravityWebView
 import com.avscode.workspace.ArchiveFormat
 import com.avscode.workspace.WorkspaceArchiveManager
 import com.google.android.material.button.MaterialButton
@@ -48,15 +51,14 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Main activity for AVSCode — VS Code for Android.
+ * Main activity for DroidAntigravity — Antigravity Client for Android.
  *
  * Implements:
- * - Home Dashboard with Primary VS Code Card, Terminal Card, Open Ports, Workspace, and About.
- * - Dedicated clean rootfs & bootstrap installation UX (no raw terminal exposed during setup).
- * - Fullscreen VS Code WebView with persistent return-to-dashboard navigation.
- * - Interactive Ubuntu PRoot Terminal shell.
- * - In-app Android <-> Linux Authentication Bridge.
- * - Workspace project import and export supporting ZIP, TAR.GZ, and TAR.XZ.
+ * - Unified Home Dashboard with LOCAL (LinuxDroid) and CODESPACES (GitHub) backends.
+ * - Fullscreen Antigravity WebView workspace with responsive zoom and reload controls.
+ * - Interactive Linux Terminal PTY shell for recovery and diagnostics.
+ * - Dedicated In-App Authentication Dialog for OAuth flows.
+ * - Workspace project import and export.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -76,13 +78,25 @@ class MainActivity : AppCompatActivity() {
     private lateinit var storageCard: MaterialCardView
     private lateinit var btnGrantStorage: MaterialButton
 
-    // VS Code Card
-    private lateinit var cardVsCode: MaterialCardView
-    private lateinit var tvVsCodeStatusDesc: TextView
-    private lateinit var ivVsCodeStatusDot: ImageView
-    private lateinit var pbVsCodeStarting: ProgressBar
-    private lateinit var btnVsCodeAction: MaterialButton
-    private lateinit var btnVsCodeStop: MaterialButton
+    // Local LinuxDroid Card
+    private lateinit var cardLocal: MaterialCardView
+    private lateinit var tvLocalStatusDesc: TextView
+    private lateinit var ivLocalStatusDot: ImageView
+    private lateinit var pbLocalStarting: ProgressBar
+    private lateinit var btnLocalAction: MaterialButton
+    private lateinit var btnLocalStop: MaterialButton
+
+    // GitHub Codespaces Card
+    private lateinit var cardCodespaces: MaterialCardView
+    private lateinit var tvCodespacesStatus: TextView
+    private lateinit var btnAuthGithub: MaterialButton
+    private lateinit var btnRefreshCodespaces: MaterialButton
+    private lateinit var pbCodespacesLoading: ProgressBar
+    private lateinit var layoutCodespacesItems: LinearLayout
+    private lateinit var layoutCodespacesEmpty: LinearLayout
+    private lateinit var tvCodespacesEmptyMsg: TextView
+    private lateinit var btnCodespacesLogin: MaterialButton
+    private lateinit var btnNewCodespace: MaterialButton
 
     // Terminal Card
     private lateinit var cardTerminal: MaterialCardView
@@ -114,7 +128,7 @@ class MainActivity : AppCompatActivity() {
     // About Section
     private lateinit var tvAboutAppVer: TextView
     private lateinit var tvAboutDistro: TextView
-    private lateinit var tvAboutVsCode: TextView
+    private lateinit var tvAboutAntigravity: TextView
     private lateinit var tvAboutAndroid: TextView
     private lateinit var tvAboutDevice: TextView
     private lateinit var tvAboutCpu: TextView
@@ -126,13 +140,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvInstallPercent: TextView
     private lateinit var btnInstallRetry: MaterialButton
 
-    // Editor View
+    // Editor View (Antigravity Web UI Workspace)
     private lateinit var btnEditorBackDashboard: MaterialButton
     private lateinit var tvEditorTitle: TextView
     private lateinit var btnZoomOut: MaterialButton
     private lateinit var tvZoomLevel: TextView
     private lateinit var btnZoomIn: MaterialButton
     private lateinit var btnToggleDesktop: MaterialButton
+    private lateinit var btnEditorRefresh: MaterialButton
     private lateinit var btnEditorToTerminal: MaterialButton
     private lateinit var webviewContainer: FrameLayout
 
@@ -162,7 +177,7 @@ class MainActivity : AppCompatActivity() {
 
     // Managers & Controllers
     private lateinit var runtimeController: RuntimeController
-    private lateinit var webViewManager: VsCodeWebView
+    private lateinit var webViewManager: AntigravityWebView
     private lateinit var portScanner: PortScanner
     private lateinit var workspaceArchiveManager: WorkspaceArchiveManager
     private lateinit var aboutInfoProvider: AboutInfoProvider
@@ -176,7 +191,6 @@ class MainActivity : AppCompatActivity() {
     private var pendingExportProject: File? = null
     private var pendingExportFormat: ArchiveFormat? = null
 
-    // Activity Result Launchers for Archive Import and Export
     private val importArchiveLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri?.let { handleImportArchive(it) }
     }
@@ -201,12 +215,8 @@ class MainActivity : AppCompatActivity() {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-
         super.onCreate(savedInstanceState)
-
-        // Enable edge-to-edge layout
         WindowCompat.setDecorFitsSystemWindows(window, false)
-
         setContentView(R.layout.activity_main)
         AvsLogger.i(TAG, "MainActivity created")
 
@@ -215,8 +225,7 @@ class MainActivity : AppCompatActivity() {
         checkNotificationPermission()
 
         runtimeController = RuntimeController.getInstance(this)
-
-        webViewManager = VsCodeWebView(this)
+        webViewManager = AntigravityWebView(this)
         portScanner = PortScanner()
         workspaceArchiveManager = WorkspaceArchiveManager(runtimeController.paths.hostProjectsDir)
         aboutInfoProvider = AboutInfoProvider(this)
@@ -225,11 +234,9 @@ class MainActivity : AppCompatActivity() {
         updateAboutSection()
         updateWorkspaceSummary()
 
-        // Initialize Terminal UI
         terminalOutput.text = terminalSession.buffer.render()
         tvCliPrompt.text = terminalSession.getPrompt()
 
-        // Wire zoom and desktop mode callbacks
         tvZoomLevel.text = "${webViewManager.currentZoomLevel}%"
         webViewManager.onZoomChanged = { level ->
             runOnUiThread { tvZoomLevel.text = "$level%" }
@@ -239,10 +246,8 @@ class MainActivity : AppCompatActivity() {
         }
         updateDesktopButtonState(webViewManager.isDesktopMode)
 
-        // Start live auto-refresh for open ports on dashboard
         startPortsAutoRefresh()
 
-        // Wire up dedicated in-app Auth Dialog (pure in-app WebView, NO external browser)
         runtimeController.onAuthRequestTriggered = { requestId, authUrl, title ->
             runOnUiThread {
                 try {
@@ -256,23 +261,27 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Wire up AuthBridge callback interception from WebView
         webViewManager.onAuthCallbackReceived = { uri ->
             handleAuthCallbackUri(uri)
         }
 
-        // Wire external URL routing to dedicated in-app auth container with close button
         webViewManager.onExternalUrlRequested = { url ->
             runOnUiThread {
-                showAuthContainer(url, getString(R.string.auth_title))
+                if (AntigravityWebView.isAuthUrl(url)) {
+                    showAuthContainer(url, getString(R.string.auth_title))
+                } else {
+                    try {
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(browserIntent)
+                    } catch (e: Exception) {
+                        AvsLogger.w(TAG, "No external browser available: ${e.message}")
+                        showAuthContainer(url, getString(R.string.auth_title))
+                    }
+                }
             }
             true
-        }
-
-        webViewManager.onAuthFlowStateChanged = { inAuthFlow ->
-            runOnUiThread {
-                btnEditorCloseAuth.visibility = if (inAuthFlow) View.VISIBLE else View.GONE
-            }
         }
 
         webViewManager.onConnectionError = { err ->
@@ -281,8 +290,8 @@ class MainActivity : AppCompatActivity() {
 
         observeRuntimeState()
         observeTerminalLogs()
+        loadCodespaces()
 
-        // Handle system back navigation
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (authContainer.visibility == View.VISIBLE) {
@@ -298,14 +307,6 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 if (editorContainer.visibility == View.VISIBLE) {
-                    if (webViewManager.isInAuthFlow()) {
-                        webViewManager.cancelAuthAndRestoreEditor()
-                        Toast.makeText(this@MainActivity, "Authentication cancelled", Toast.LENGTH_SHORT).show()
-                        return
-                    }
-                    if (webViewManager.handleBackPress()) {
-                        return
-                    }
                     showDashboardView()
                     return
                 }
@@ -315,7 +316,6 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
 
-                // If on dashboard or installation, perform default back
                 isEnabled = false
                 onBackPressedDispatcher.onBackPressed()
                 isEnabled = true
@@ -324,7 +324,6 @@ class MainActivity : AppCompatActivity() {
 
         handleIncomingAuthIntent(intent)
 
-        // Check storage and start runtime
         lifecycleScope.launch {
             if (StoragePermissionHelper.isStorageConfigured(this@MainActivity)) {
                 if (runtimeController.appState.value !is AppState.Ready) {
@@ -343,86 +342,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleAuthCallbackUri(data: Uri): Boolean {
         AvsLogger.i(TAG, "Processing auth callback: $data")
-
-        // 1. Unwrap vscode.dev redirect state if present
-        var effectiveUri = data
-        val stateParam = data.getQueryParameter("state")
-        if (data.host?.contains("vscode.dev") == true && !stateParam.isNullOrBlank()) {
-            try {
-                val decodedState = Uri.parse(Uri.decode(stateParam))
-                val codeParam = data.getQueryParameter("code")
-                effectiveUri = if (codeParam != null && decodedState.getQueryParameter("code") == null) {
-                    decodedState.buildUpon().appendQueryParameter("code", codeParam).build()
-                } else {
-                    decodedState
-                }
-                AvsLogger.i(TAG, "Unwrapped redirect state into: $effectiveUri")
-            } catch (e: Exception) {
-                AvsLogger.w(TAG, "Failed to unwrap state: ${e.message}")
-            }
-        }
-
-        // 2. Extract VS Code Web callback parameters
-        val reqId = effectiveUri.getQueryParameter("vscode-reqid")
-        val scheme = effectiveUri.getQueryParameter("vscode-scheme") ?: effectiveUri.scheme ?: "vscode"
-        val authority = effectiveUri.getQueryParameter("vscode-authority") ?: effectiveUri.authority ?: "vscode.github-authentication"
-        val path = effectiveUri.getQueryParameter("vscode-path") ?: effectiveUri.path ?: "/did-authenticate"
-        val query = effectiveUri.getQueryParameter("vscode-query")
-
-        // Build query string of non-vscode parameters (e.g. code, state, nonce)
-        val queryBuilder = StringBuilder()
-        for (name in effectiveUri.queryParameterNames) {
-            if (!name.startsWith("vscode-")) {
-                val value = effectiveUri.getQueryParameter(name)
-                if (value != null) {
-                    if (queryBuilder.isNotEmpty()) queryBuilder.append("&")
-                    queryBuilder.append(name).append("=").append(Uri.encode(value))
-                }
-            }
-        }
-        if (!query.isNullOrBlank()) {
-            if (queryBuilder.isNotEmpty()) queryBuilder.append("&")
-            queryBuilder.append(query)
-        }
-
-        // 3. Inject URL callback into active VS Code editor instance
-        webViewManager.injectVsCodeUrlCallback(
-            reqId = reqId,
-            scheme = scheme,
-            authority = authority,
-            path = path,
-            query = queryBuilder.toString()
-        )
-
-        // 4. Complete AuthBridgeServer session for any CLI / guest processes
-        val code = effectiveUri.getQueryParameter("code")
-        val token = effectiveUri.getQueryParameter("token")
-        val requestId = effectiveUri.getQueryParameter("requestId") ?: effectiveUri.getQueryParameter("state") ?: reqId
+        val code = data.getQueryParameter("code")
+        val token = data.getQueryParameter("token")
+        val requestId = data.getQueryParameter("requestId") ?: data.getQueryParameter("state")
         if (requestId != null) {
             runtimeController.authBridgeServer.completeSession(requestId, code, token)
         }
 
-        // Notify loopback AuthBridgeServer in background
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val bridgePort = runtimeController.authBridgePort
-                if (bridgePort > 0) {
-                    val q = effectiveUri.query.orEmpty()
-                    val bridgeUrl = java.net.URL("http://127.0.0.1:$bridgePort/auth/callback?$q")
-                    val conn = bridgeUrl.openConnection() as java.net.HttpURLConnection
-                    conn.connectTimeout = 3000
-                    conn.readTimeout = 3000
-                    conn.responseCode
-                    conn.disconnect()
-                }
-            } catch (e: Exception) {
-                AvsLogger.d(TAG, "Background notify to AuthBridgeServer: ${e.message}")
-            }
-        }
-
         CookieManager.getInstance().flush()
 
-        // 5. Dismiss auth dialog and return to editor
         runOnUiThread {
             hideAuthContainer()
             showEditorView()
@@ -433,7 +361,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleIncomingAuthIntent(intent: Intent?) {
         val data = intent?.data ?: return
-        if (webViewManager.isAuthCallback(data)) {
+        if (AntigravityWebView.isAuthCallback(data)) {
             handleAuthCallbackUri(data)
             showEditorView()
         }
@@ -451,13 +379,25 @@ class MainActivity : AppCompatActivity() {
         storageCard = findViewById(R.id.storage_card)
         btnGrantStorage = findViewById(R.id.btn_grant_storage)
 
-        // VS Code Card
-        cardVsCode = findViewById(R.id.card_vscode)
-        tvVsCodeStatusDesc = findViewById(R.id.tv_vscode_status_desc)
-        ivVsCodeStatusDot = findViewById(R.id.iv_vscode_status_dot)
-        pbVsCodeStarting = findViewById(R.id.pb_vscode_starting)
-        btnVsCodeAction = findViewById(R.id.btn_vscode_action)
-        btnVsCodeStop = findViewById(R.id.btn_vscode_stop)
+        // Local LinuxDroid Card
+        cardLocal = findViewById(R.id.card_local)
+        tvLocalStatusDesc = findViewById(R.id.tv_local_status_desc)
+        ivLocalStatusDot = findViewById(R.id.iv_local_status_dot)
+        pbLocalStarting = findViewById(R.id.pb_local_starting)
+        btnLocalAction = findViewById(R.id.btn_local_action)
+        btnLocalStop = findViewById(R.id.btn_local_stop)
+
+        // GitHub Codespaces Card
+        cardCodespaces = findViewById(R.id.card_codespaces)
+        tvCodespacesStatus = findViewById(R.id.tv_codespaces_status)
+        btnAuthGithub = findViewById(R.id.btn_auth_github)
+        btnRefreshCodespaces = findViewById(R.id.btn_refresh_codespaces)
+        pbCodespacesLoading = findViewById(R.id.pb_codespaces_loading)
+        layoutCodespacesItems = findViewById(R.id.layout_codespaces_items)
+        layoutCodespacesEmpty = findViewById(R.id.layout_codespaces_empty)
+        tvCodespacesEmptyMsg = findViewById(R.id.tv_codespaces_empty_msg)
+        btnCodespacesLogin = findViewById(R.id.btn_codespaces_login)
+        btnNewCodespace = findViewById(R.id.btn_new_codespace)
 
         // Terminal Card
         cardTerminal = findViewById(R.id.card_terminal)
@@ -488,7 +428,7 @@ class MainActivity : AppCompatActivity() {
         // About Section
         tvAboutAppVer = findViewById(R.id.tv_about_app_ver)
         tvAboutDistro = findViewById(R.id.tv_about_distro)
-        tvAboutVsCode = findViewById(R.id.tv_about_vscode)
+        tvAboutAntigravity = findViewById(R.id.tv_about_antigravity)
         tvAboutAndroid = findViewById(R.id.tv_about_android)
         tvAboutDevice = findViewById(R.id.tv_about_device)
         tvAboutCpu = findViewById(R.id.tv_about_cpu)
@@ -507,6 +447,7 @@ class MainActivity : AppCompatActivity() {
         tvZoomLevel = findViewById(R.id.tv_zoom_level)
         btnZoomIn = findViewById(R.id.btn_zoom_in)
         btnToggleDesktop = findViewById(R.id.btn_toggle_desktop)
+        btnEditorRefresh = findViewById(R.id.btn_editor_refresh)
         btnEditorToTerminal = findViewById(R.id.btn_editor_to_terminal)
         webviewContainer = findViewById(R.id.webview_container)
 
@@ -535,128 +476,47 @@ class MainActivity : AppCompatActivity() {
         btnRunCommand = findViewById(R.id.btn_run_command)
 
         // Wire Click Listeners
-        btnSettings.setOnClickListener {
-            showSettingsDialog()
-        }
+        btnSettings.setOnClickListener { showSettingsDialog() }
+        btnGrantStorage.setOnClickListener { handleGrantStorageAccess() }
 
-        btnGrantStorage.setOnClickListener {
-            handleGrantStorageAccess()
-        }
+        btnLocalAction.setOnClickListener { handleLocalActionClick() }
+        btnLocalStop.setOnClickListener { handleLocalStopClick() }
 
-        btnVsCodeAction.setOnClickListener {
-            handleVsCodeActionClick()
-        }
+        btnAuthGithub.setOnClickListener { showGitHubTokenDialog() }
+        btnRefreshCodespaces.setOnClickListener { loadCodespaces() }
+        btnCodespacesLogin.setOnClickListener { showGitHubTokenDialog() }
+        btnNewCodespace.setOnClickListener { showNewCodespaceDialog() }
 
-        btnVsCodeStop.setOnClickListener {
-            handleVsCodeStopClick()
-        }
-
-        btnCloseAuth.setOnClickListener {
-            hideAuthContainer()
-            if (runtimeController.appState.value is AppState.Ready) {
-                showEditorView()
-            }
-        }
-
-        btnCloseAuthAction.setOnClickListener {
-            hideAuthContainer()
-            if (runtimeController.appState.value is AppState.Ready) {
-                showEditorView()
-            }
-        }
-
-        btnEditorCloseAuth.setOnClickListener {
-            webViewManager.cancelAuthAndRestoreEditor()
-            btnEditorCloseAuth.visibility = View.GONE
-        }
+        btnCloseAuth.setOnClickListener { hideAuthContainer(); if (runtimeController.appState.value is AppState.Ready) showEditorView() }
+        btnCloseAuthAction.setOnClickListener { hideAuthContainer(); if (runtimeController.appState.value is AppState.Ready) showEditorView() }
 
         btnOpenTerminal.setOnClickListener {
             showTerminalView()
-            lifecycleScope.launch {
-                runtimeController.ensureLinuxStarted()
-            }
+            lifecycleScope.launch { runtimeController.ensureLinuxStarted() }
         }
 
-        btnRefreshPorts.setOnClickListener {
-            updatePortsList()
-        }
+        btnRefreshPorts.setOnClickListener { updatePortsList() }
+        btnImportArchive.setOnClickListener { importArchiveLauncher.launch(arrayOf("*/*")) }
+        btnExportProject.setOnClickListener { showExportProjectDialog() }
+        btnInstallRetry.setOnClickListener { lifecycleScope.launch { runtimeController.startAll(forceRestart = true) } }
 
-        btnImportArchive.setOnClickListener {
-            importArchiveLauncher.launch(arrayOf("*/*"))
-        }
+        btnEditorBackDashboard.setOnClickListener { showDashboardView() }
+        btnEditorRefresh.setOnClickListener { webViewManager.reload() }
+        btnEditorToTerminal.setOnClickListener { showTerminalView() }
+        btnTerminalBackDashboard.setOnClickListener { showDashboardView() }
+        btnTerminalToEditor.setOnClickListener { showEditorView() }
+        btnScrollToBottom.setOnClickListener { scrollTerminalToBottom(); btnScrollToBottom.visibility = View.GONE }
 
-        btnExportProject.setOnClickListener {
-            showExportProjectDialog()
-        }
+        btnZoomIn.setOnClickListener { webViewManager.zoomIn() }
+        btnZoomOut.setOnClickListener { webViewManager.zoomOut() }
+        tvZoomLevel.setOnClickListener { webViewManager.resetZoom() }
+        btnToggleDesktop.setOnClickListener { webViewManager.toggleDesktopMode() }
 
-        btnInstallRetry.setOnClickListener {
-            btnInstallRetry.visibility = View.GONE
-            lifecycleScope.launch {
-                runtimeController.startAll(forceRestart = true)
-            }
-        }
-
-        btnEditorBackDashboard.setOnClickListener {
-            showDashboardView()
-        }
-
-        btnEditorToTerminal.setOnClickListener {
-            showTerminalView()
-        }
-
-        btnTerminalBackDashboard.setOnClickListener {
-            showDashboardView()
-        }
-
-        btnTerminalToEditor.setOnClickListener {
-            showEditorView()
-        }
-
-        // Wire Zoom Controls
-        btnZoomOut.setOnClickListener {
-            val level = webViewManager.zoomOut()
-            tvZoomLevel.text = "$level%"
-        }
-
-        btnZoomIn.setOnClickListener {
-            val level = webViewManager.zoomIn()
-            tvZoomLevel.text = "$level%"
-        }
-
-        tvZoomLevel.setOnClickListener {
-            val level = webViewManager.resetZoom()
-            tvZoomLevel.text = "$level%"
-            Toast.makeText(this, R.string.reset_zoom, Toast.LENGTH_SHORT).show()
-        }
-
-        btnToggleDesktop.setOnClickListener {
-            val isDesktop = webViewManager.toggleDesktopMode()
-            updateDesktopButtonState(isDesktop)
-            Toast.makeText(this, if (isDesktop) R.string.desktop_mode else R.string.mobile_mode, Toast.LENGTH_SHORT).show()
-        }
-
-        // Terminal Scroll Preservation & Bottom Chip
-        btnScrollToBottom.setOnClickListener {
-            btnScrollToBottom.visibility = View.GONE
-            scrollTerminalToBottom()
-        }
-
-        terminalScroll.viewTreeObserver.addOnScrollChangedListener {
-            if (isTerminalAtBottom()) {
-                btnScrollToBottom.visibility = View.GONE
-            }
-        }
-
-        // Wire Terminal Accessory Key Bar
-        keyEsc.setOnClickListener {
-            commandInput.setText("")
-        }
-
+        keyEsc.setOnClickListener { commandInput.append("\u001B") }
         keyTab.setOnClickListener {
-            val start = commandInput.selectionStart
-            val end = commandInput.selectionEnd
-            if (start >= 0 && end >= 0) {
-                commandInput.text.replace(minOf(start, end), maxOf(start, end), "\t", 0, 1)
+            val text = commandInput.text.toString()
+            if (text.isNotEmpty() && !text.endsWith(" ")) {
+                commandInput.append(" ")
             } else {
                 commandInput.append("\t")
             }
@@ -710,14 +570,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        keyCtrlX.setOnClickListener {
-            commandInput.append("\u0018")
-        }
-
-        keyCtrlO.setOnClickListener {
-            commandInput.append("\u000F")
-        }
-
+        keyCtrlX.setOnClickListener { commandInput.append("\u0018") }
+        keyCtrlO.setOnClickListener { commandInput.append("\u000F") }
         keyClear.setOnClickListener {
             lifecycleScope.launch {
                 terminalSession.executeCommand("clear") { rendered ->
@@ -726,9 +580,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        btnRunCommand.setOnClickListener {
-            submitCommand()
-        }
+        btnRunCommand.setOnClickListener { submitCommand() }
 
         commandInput.setOnEditorActionListener { _, actionId, event ->
             if (actionId == EditorInfo.IME_ACTION_SEND ||
@@ -752,46 +604,11 @@ class MainActivity : AppCompatActivity() {
             )
             val ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
 
-            // Apply insets to dashboard
-            dashboardContainer.setPadding(
-                insets.left,
-                insets.top,
-                insets.right,
-                maxOf(insets.bottom, ime.bottom)
-            )
-
-            // Apply insets to installation view
-            installationContainer.setPadding(
-                insets.left,
-                insets.top,
-                insets.right,
-                maxOf(insets.bottom, ime.bottom)
-            )
-
-            // Apply insets to terminal container
-            terminalContainer.setPadding(
-                basePad + insets.left,
-                basePad + insets.top,
-                basePad + insets.right,
-                basePad + maxOf(insets.bottom, ime.bottom)
-            )
-
-            // Apply insets to editor container
-            editorContainer.setPadding(
-                insets.left,
-                insets.top,
-                insets.right,
-                insets.bottom
-            )
-
-            // Apply insets to auth container
-            authContainer.setPadding(
-                insets.left,
-                insets.top,
-                insets.right,
-                maxOf(insets.bottom, ime.bottom)
-            )
-
+            dashboardContainer.setPadding(insets.left, insets.top, insets.right, maxOf(insets.bottom, ime.bottom))
+            installationContainer.setPadding(insets.left, insets.top, insets.right, maxOf(insets.bottom, ime.bottom))
+            terminalContainer.setPadding(basePad + insets.left, basePad + insets.top, basePad + insets.right, basePad + maxOf(insets.bottom, ime.bottom))
+            editorContainer.setPadding(insets.left, insets.top, insets.right, insets.bottom)
+            authContainer.setPadding(insets.left, insets.top, insets.right, maxOf(insets.bottom, ime.bottom))
             windowInsets
         }
     }
@@ -812,7 +629,8 @@ class MainActivity : AppCompatActivity() {
         val url = if (state is AppState.Ready) state.url else runtimeController.activeServerUrl
         if (url != null) {
             attachAndLoadWebView(url)
-            tvEditorTitle.text = url
+            val title = if (state is AppState.Ready) state.title else "DroidAntigravity"
+            tvEditorTitle.text = title
         }
         dashboardContainer.visibility = View.GONE
         installationContainer.visibility = View.GONE
@@ -861,12 +679,11 @@ class MainActivity : AppCompatActivity() {
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
-                    databaseEnabled = true
                     useWideViewPort = true
                     loadWithOverviewMode = true
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     cacheMode = WebSettings.LOAD_DEFAULT
-                    userAgentString = webViewManager.getDesktopUserAgent()
+                    userAgentString = AntigravityWebView.buildDesktopUserAgent(this@MainActivity)
                 }
                 val cookieManager = CookieManager.getInstance()
                 cookieManager.setAcceptCookie(true)
@@ -874,8 +691,7 @@ class MainActivity : AppCompatActivity() {
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         val uri = request?.url ?: return false
-                        AvsLogger.d(TAG, "Auth WebView shouldOverrideUrlLoading: $uri")
-                        if (webViewManager.isAuthCallback(uri)) {
+                        if (AntigravityWebView.isAuthCallback(uri)) {
                             handleAuthCallbackUri(uri)
                             return true
                         }
@@ -885,16 +701,8 @@ class MainActivity : AppCompatActivity() {
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                         super.onPageStarted(view, url, favicon)
                         val uri = url?.let { Uri.parse(it) }
-                        if (uri != null && webViewManager.isAuthCallback(uri)) {
+                        if (uri != null && AntigravityWebView.isAuthCallback(uri)) {
                             handleAuthCallbackUri(uri)
-                        }
-                    }
-
-                    override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                        super.onReceivedError(view, request, error)
-                        val reqUrl = request?.url
-                        if (reqUrl != null && webViewManager.isAuthCallback(reqUrl)) {
-                            handleAuthCallbackUri(reqUrl)
                         }
                     }
                 }
@@ -903,7 +711,6 @@ class MainActivity : AppCompatActivity() {
             authWebviewFrame.removeAllViews()
             authWebviewFrame.addView(webView)
         }
-
         authWebView?.loadUrl(url)
     }
 
@@ -923,7 +730,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleGrantStorageAccess() {
-
         val rootfsDir = runtimeController.paths.rootfsDir
         StoragePermissionHelper.verifyStorageAccessible(rootfsDir)
         StoragePermissionHelper.markStorageConfigured(this, rootfsDir.absolutePath)
@@ -952,7 +758,7 @@ class MainActivity : AppCompatActivity() {
         storageCard.visibility = View.VISIBLE
     }
 
-    private fun handleVsCodeActionClick() {
+    private fun handleLocalActionClick() {
         val state = runtimeController.appState.value
         when {
             state is AppState.Ready -> {
@@ -965,19 +771,195 @@ class MainActivity : AppCompatActivity() {
             }
             else -> {
                 lifecycleScope.launch {
-                    runtimeController.startVsCodeServer()
+                    runtimeController.startAntigravityServer()
                 }
             }
         }
     }
 
-    private fun handleVsCodeStopClick() {
+    private fun handleLocalStopClick() {
         lifecycleScope.launch {
-            btnVsCodeStop.isEnabled = false
-            btnVsCodeAction.isEnabled = false
-            runtimeController.stopVsCodeServer()
+            btnLocalStop.isEnabled = false
+            btnLocalAction.isEnabled = false
+            runtimeController.stopAntigravityServer()
         }
     }
+
+    // =========================================================================
+    // GitHub Codespaces Integration
+    // =========================================================================
+
+    private fun loadCodespaces() {
+        val mgr = runtimeController.codespaceManager
+        if (!mgr.isAuthenticated()) {
+            layoutCodespacesEmpty.visibility = View.VISIBLE
+            layoutCodespacesItems.visibility = View.GONE
+            tvCodespacesStatus.text = getString(R.string.github_auth_required)
+            tvCodespacesEmptyMsg.text = getString(R.string.github_auth_required)
+            return
+        }
+
+        layoutCodespacesEmpty.visibility = View.GONE
+        pbCodespacesLoading.visibility = View.VISIBLE
+        tvCodespacesStatus.text = "Fetching Codespaces..."
+
+        lifecycleScope.launch {
+            val result = mgr.listCodespaces()
+            pbCodespacesLoading.visibility = View.GONE
+
+            if (result is Result.Success) {
+                val list = result.data
+                tvCodespacesStatus.text = "${list.size} Codespace${if (list.size == 1) "" else "s"}"
+                layoutCodespacesItems.removeAllViews()
+
+                if (list.isEmpty()) {
+                    layoutCodespacesEmpty.visibility = View.VISIBLE
+                    tvCodespacesEmptyMsg.text = getString(R.string.no_codespaces_found)
+                    btnCodespacesLogin.visibility = View.GONE
+                    layoutCodespacesItems.visibility = View.GONE
+                } else {
+                    layoutCodespacesEmpty.visibility = View.GONE
+                    layoutCodespacesItems.visibility = View.VISIBLE
+
+                    for (item in list) {
+                        val itemView = layoutInflater.inflate(R.layout.item_codespace, layoutCodespacesItems, false)
+                        val tvName = itemView.findViewById<TextView>(R.id.codespace_name)
+                        val tvRepo = itemView.findViewById<TextView>(R.id.codespace_repo)
+                        val tvState = itemView.findViewById<TextView>(R.id.codespace_state_label)
+                        val dot = itemView.findViewById<View>(R.id.codespace_status_dot)
+                        val btnAction = itemView.findViewById<MaterialButton>(R.id.btn_codespace_action)
+                        val btnStop = itemView.findViewById<MaterialButton>(R.id.btn_codespace_stop)
+
+                        tvName.text = item.name
+                        tvRepo.text = item.repositoryFullName.ifEmpty { item.repositoryName }
+                        tvState.text = item.state.name
+
+                        // Status dot color
+                        when {
+                            item.isRunning -> {
+                                dot.setBackgroundColor(0xFF4CAF50.toInt()) // Green
+                                btnAction.text = getString(R.string.codespace_open)
+                                btnStop.visibility = View.VISIBLE
+                            }
+                            item.isBusy -> {
+                                dot.setBackgroundColor(0xFFFF9800.toInt()) // Orange
+                                btnAction.text = "Waiting..."
+                                btnAction.isEnabled = false
+                                btnStop.visibility = View.GONE
+                            }
+                            else -> {
+                                dot.setBackgroundColor(0xFF888888.toInt()) // Gray
+                                btnAction.text = getString(R.string.codespace_start)
+                                btnStop.visibility = View.GONE
+                            }
+                        }
+
+                        btnAction.setOnClickListener {
+                            openOrStartCodespace(item)
+                        }
+
+                        btnStop.setOnClickListener {
+                            lifecycleScope.launch {
+                                btnStop.isEnabled = false
+                                mgr.stopCodespace(item.name)
+                                loadCodespaces()
+                            }
+                        }
+
+                        layoutCodespacesItems.addView(itemView)
+                    }
+                }
+            } else {
+                layoutCodespacesEmpty.visibility = View.VISIBLE
+                val err = (result as Result.Failure).message ?: "Failed to load Codespaces"
+                tvCodespacesEmptyMsg.text = err
+                tvCodespacesStatus.text = "Connection error"
+            }
+        }
+    }
+
+    private fun openOrStartCodespace(item: CodespaceItem) {
+        pbCodespacesLoading.visibility = View.VISIBLE
+        lifecycleScope.launch {
+            val connectResult = runtimeController.connectCodespace(item)
+            pbCodespacesLoading.visibility = View.GONE
+            if (connectResult is Result.Success) {
+                val url = connectResult.data
+                attachAndLoadWebView(url)
+                tvEditorTitle.text = item.repositoryName.ifEmpty { item.name }
+                showEditorView()
+            } else {
+                val err = (connectResult as Result.Failure).message ?: "Connection failed"
+                Toast.makeText(this@MainActivity, err, Toast.LENGTH_LONG).show()
+                loadCodespaces()
+            }
+        }
+    }
+
+    private fun showGitHubTokenDialog() {
+        val currentToken = runtimeController.codespaceManager.getGitHubToken().orEmpty()
+        val input = EditText(this).apply {
+            hint = getString(R.string.github_token_hint)
+            setText(currentToken)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.github_login)
+            .setMessage("Enter a GitHub Personal Access Token (PAT) with 'codespace' and 'repo' scopes:")
+            .setView(input)
+            .setPositiveButton(R.string.save_token) { _, _ ->
+                val token = input.text.toString().trim()
+                if (token.isNotEmpty()) {
+                    runtimeController.codespaceManager.saveGitHubToken(token)
+                    loadCodespaces()
+                } else {
+                    runtimeController.codespaceManager.clearGitHubToken()
+                    loadCodespaces()
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun showNewCodespaceDialog() {
+        val input = EditText(this).apply {
+            hint = "owner/repository (e.g. user/my-project)"
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.new_codespace)
+            .setMessage("Enter the GitHub repository to create a new Codespace for:")
+            .setView(input)
+            .setPositiveButton("Create") { _, _ ->
+                val repoFull = input.text.toString().trim()
+                if (repoFull.contains("/")) {
+                    val parts = repoFull.split("/")
+                    val owner = parts[0]
+                    val repo = parts[1]
+                    pbCodespacesLoading.visibility = View.VISIBLE
+                    lifecycleScope.launch {
+                        val result = runtimeController.codespaceManager.createCodespace(owner, repo)
+                        pbCodespacesLoading.visibility = View.GONE
+                        if (result is Result.Success) {
+                            Toast.makeText(this@MainActivity, "Codespace created: ${result.data.name}", Toast.LENGTH_SHORT).show()
+                            loadCodespaces()
+                        } else {
+                            val err = (result as Result.Failure).message ?: "Failed to create Codespace"
+                            Toast.makeText(this@MainActivity, err, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } else {
+                    Toast.makeText(this, "Please enter in format owner/repo", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    // =========================================================================
+    // State Observation
+    // =========================================================================
 
     private fun observeRuntimeState() {
         lifecycleScope.launch {
@@ -991,13 +973,13 @@ class MainActivity : AppCompatActivity() {
                     }
                     is AppState.NotInstalled -> {
                         showDashboardView()
-                        tvVsCodeStatusDesc.text = getString(R.string.vscode_status_stopped)
-                        btnVsCodeAction.text = getString(R.string.start_vscode)
-                        btnVsCodeAction.setIconResource(R.drawable.ic_play_arrow)
-                        btnVsCodeAction.isEnabled = true
-                        btnVsCodeStop.visibility = View.GONE
-                        pbVsCodeStarting.visibility = View.GONE
-                        ivVsCodeStatusDot.visibility = View.GONE
+                        tvLocalStatusDesc.text = getString(R.string.antigravity_status_stopped)
+                        btnLocalAction.text = getString(R.string.open_local)
+                        btnLocalAction.setIconResource(R.drawable.ic_play_arrow)
+                        btnLocalAction.isEnabled = true
+                        btnLocalStop.visibility = View.GONE
+                        pbLocalStarting.visibility = View.GONE
+                        ivLocalStatusDot.visibility = View.GONE
                     }
                     is AppState.DownloadingRootfs -> {
                         val pct = (state.progress * 100).toInt()
@@ -1023,7 +1005,7 @@ class MainActivity : AppCompatActivity() {
                         )
                     }
                     is AppState.StartingLinux -> {
-                        btnVsCodeStop.visibility = View.GONE
+                        btnLocalStop.visibility = View.GONE
                         if (installationContainer.visibility == View.VISIBLE) {
                             showInstallationView(
                                 title = getString(R.string.starting_linux),
@@ -1032,10 +1014,10 @@ class MainActivity : AppCompatActivity() {
                                 isIndeterminate = true
                             )
                         } else {
-                            tvVsCodeStatusDesc.text = getString(R.string.vscode_status_starting)
-                            pbVsCodeStarting.visibility = View.VISIBLE
-                            btnVsCodeAction.text = "Starting..."
-                            btnVsCodeAction.isEnabled = false
+                            tvLocalStatusDesc.text = getString(R.string.starting_linux)
+                            pbLocalStarting.visibility = View.VISIBLE
+                            btnLocalAction.text = "Starting..."
+                            btnLocalAction.isEnabled = false
                         }
                     }
                     is AppState.VerifyingLinux -> {
@@ -1049,18 +1031,17 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     is AppState.LinuxReady -> {
-                        // Userspace ready
                         if (installationContainer.visibility == View.VISIBLE) {
                             showDashboardView()
                         }
                         statusBadge.text = "ONLINE"
-                        tvVsCodeStatusDesc.text = getString(R.string.vscode_status_stopped)
-                        btnVsCodeAction.text = getString(R.string.start_vscode)
-                        btnVsCodeAction.setIconResource(R.drawable.ic_play_arrow)
-                        btnVsCodeAction.isEnabled = true
-                        btnVsCodeStop.visibility = View.GONE
-                        pbVsCodeStarting.visibility = View.GONE
-                        ivVsCodeStatusDot.visibility = View.GONE
+                        tvLocalStatusDesc.text = getString(R.string.antigravity_status_stopped)
+                        btnLocalAction.text = getString(R.string.open_local)
+                        btnLocalAction.setIconResource(R.drawable.ic_play_arrow)
+                        btnLocalAction.isEnabled = true
+                        btnLocalStop.visibility = View.GONE
+                        pbLocalStarting.visibility = View.GONE
+                        ivLocalStatusDot.visibility = View.GONE
                     }
                     is AppState.InstallingPackages -> {
                         showInstallationView(
@@ -1070,72 +1051,66 @@ class MainActivity : AppCompatActivity() {
                             isIndeterminate = true
                         )
                     }
-                    is AppState.InstallingVsCode -> {
+                    is AppState.InstallingAntigravity -> {
                         val pct = (state.progress * 100).toInt()
                         showInstallationView(
-                            title = "Installing VS Code CLI...",
+                            title = "Setting up Antigravity...",
                             step = state.status,
                             progress = pct
                         )
                     }
-                    is AppState.VsCodeReady -> {
+                    is AppState.AntigravityReady -> {
                         if (installationContainer.visibility == View.VISIBLE) {
                             showDashboardView()
                         }
-                        tvVsCodeStatusDesc.text = getString(R.string.vscode_status_stopped)
-                        btnVsCodeAction.text = getString(R.string.start_vscode)
-                        btnVsCodeAction.setIconResource(R.drawable.ic_play_arrow)
-                        btnVsCodeAction.isEnabled = true
-                        btnVsCodeStop.visibility = View.GONE
-                        pbVsCodeStarting.visibility = View.GONE
-                        ivVsCodeStatusDot.visibility = View.GONE
+                        tvLocalStatusDesc.text = getString(R.string.antigravity_status_stopped)
+                        btnLocalAction.text = getString(R.string.open_local)
+                        btnLocalAction.setIconResource(R.drawable.ic_play_arrow)
+                        btnLocalAction.isEnabled = true
+                        btnLocalStop.visibility = View.GONE
+                        pbLocalStarting.visibility = View.GONE
+                        ivLocalStatusDot.visibility = View.GONE
                     }
                     is AppState.StartingAuthBridge -> {
-                        tvVsCodeStatusDesc.text = "Starting Auth Bridge..."
-                        pbVsCodeStarting.visibility = View.VISIBLE
-                        btnVsCodeAction.text = "Starting..."
-                        btnVsCodeAction.isEnabled = false
-                        btnVsCodeStop.visibility = View.GONE
+                        tvLocalStatusDesc.text = "Starting Auth Bridge..."
+                        pbLocalStarting.visibility = View.VISIBLE
+                        btnLocalAction.text = "Starting..."
+                        btnLocalAction.isEnabled = false
                     }
-                    is AppState.StartingVsCodeServer -> {
-                        tvVsCodeStatusDesc.text = getString(R.string.starting_vscode)
-                        pbVsCodeStarting.visibility = View.VISIBLE
-                        btnVsCodeAction.text = "Starting..."
-                        btnVsCodeAction.isEnabled = false
-                        btnVsCodeStop.visibility = View.GONE
+                    is AppState.StartingAntigravityServer -> {
+                        tvLocalStatusDesc.text = getString(R.string.starting_antigravity)
+                        pbLocalStarting.visibility = View.VISIBLE
+                        btnLocalAction.text = "Starting..."
+                        btnLocalAction.isEnabled = false
                     }
                     is AppState.Ready -> {
-                        // Ensure WebView is prepared
-                        val sPort = runtimeController.serverPort ?: 0
-                        val bPort = runtimeController.authBridgePort
-                        webViewManager.setEndpoints(sPort, bPort, state.url)
+                        val sPort = runtimeController.serverPort
+                        webViewManager.loadEndpoint(state.url, sPort)
                         attachAndLoadWebView(state.url)
 
-                        // Update Dashboard Card
-                        tvVsCodeStatusDesc.text = getString(R.string.vscode_status_running, state.url)
-                        ivVsCodeStatusDot.visibility = View.VISIBLE
-                        pbVsCodeStarting.visibility = View.GONE
-                        btnVsCodeAction.text = getString(R.string.return_to_code)
-                        btnVsCodeAction.setIconResource(R.drawable.ic_launch)
-                        btnVsCodeAction.isEnabled = true
-                        btnVsCodeStop.visibility = View.VISIBLE
-                        btnVsCodeStop.isEnabled = true
+                        tvLocalStatusDesc.text = getString(R.string.antigravity_status_running, state.url)
+                        ivLocalStatusDot.visibility = View.VISIBLE
+                        pbLocalStarting.visibility = View.GONE
+                        btnLocalAction.text = getString(R.string.open_local)
+                        btnLocalAction.setIconResource(R.drawable.ic_launch)
+                        btnLocalAction.isEnabled = true
+                        btnLocalStop.visibility = View.VISIBLE
+                        btnLocalStop.isEnabled = true
                         statusBadge.text = "READY"
 
                         updatePortsList()
 
-                        // If user was waiting during bootstrap, switch directly into the Editor
                         if (installationContainer.visibility == View.VISIBLE) {
                             showEditorView()
                         }
                     }
                     is AppState.Stopping -> {
-                        tvVsCodeStatusDesc.text = getString(R.string.stopping_vscode)
-                        ivVsCodeStatusDot.visibility = View.GONE
-                        pbVsCodeStarting.visibility = View.VISIBLE
-                        btnVsCodeAction.isEnabled = false
-                        btnVsCodeStop.visibility = View.VISIBLE
-                        btnVsCodeStop.isEnabled = false
+                        tvLocalStatusDesc.text = getString(R.string.stopping_antigravity)
+                        ivLocalStatusDot.visibility = View.GONE
+                        pbLocalStarting.visibility = View.VISIBLE
+                        btnLocalAction.isEnabled = false
+                        btnLocalStop.visibility = View.VISIBLE
+                        btnLocalStop.isEnabled = false
                     }
                     is AppState.RootfsFailed -> {
                         showInstallationView(
@@ -1144,7 +1119,7 @@ class MainActivity : AppCompatActivity() {
                             progress = 0
                         )
                         btnInstallRetry.visibility = View.VISIBLE
-                        btnVsCodeStop.visibility = View.GONE
+                        btnLocalStop.visibility = View.GONE
                     }
                     is AppState.PackageInstallFailed -> {
                         showInstallationView(
@@ -1153,22 +1128,22 @@ class MainActivity : AppCompatActivity() {
                             progress = 0
                         )
                         btnInstallRetry.visibility = View.VISIBLE
-                        btnVsCodeStop.visibility = View.GONE
+                        btnLocalStop.visibility = View.GONE
                     }
-                    is AppState.VsCodeFailed, is AppState.LinuxFailed, is AppState.Failed -> {
+                    is AppState.AntigravityFailed, is AppState.LinuxFailed, is AppState.Failed -> {
                         showDashboardView()
                         val msg = when (state) {
-                            is AppState.VsCodeFailed -> state.message
+                            is AppState.AntigravityFailed -> state.message
                             is AppState.LinuxFailed -> state.message
                             is AppState.Failed -> state.message
                         }
-                        tvVsCodeStatusDesc.text = msg
-                        ivVsCodeStatusDot.visibility = View.GONE
-                        pbVsCodeStarting.visibility = View.GONE
-                        btnVsCodeAction.text = getString(R.string.retry)
-                        btnVsCodeAction.setIconResource(R.drawable.ic_refresh)
-                        btnVsCodeAction.isEnabled = true
-                        btnVsCodeStop.visibility = View.GONE
+                        tvLocalStatusDesc.text = msg
+                        ivLocalStatusDot.visibility = View.GONE
+                        pbLocalStarting.visibility = View.GONE
+                        btnLocalAction.text = getString(R.string.retry)
+                        btnLocalAction.setIconResource(R.drawable.ic_refresh)
+                        btnLocalAction.isEnabled = true
+                        btnLocalStop.visibility = View.GONE
                     }
                 }
             }
@@ -1176,7 +1151,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun observeTerminalLogs() {
-        // Internal supervisor/runtime logs are monitored for diagnostics without polluting user terminal
         lifecycleScope.launch {
             runtimeController.terminalLogs.collect { line ->
                 AvsLogger.d(TAG, "[SupervisorLog] $line")
@@ -1222,7 +1196,8 @@ class MainActivity : AppCompatActivity() {
             webviewContainer.addView(webView)
             webViewAttached = true
         }
-        webViewManager.loadUrl(url)
+        val sPort = runtimeController.serverPort
+        webViewManager.loadEndpoint(url, sPort)
     }
 
     private fun submitCommand() {
@@ -1256,7 +1231,6 @@ class MainActivity : AppCompatActivity() {
             val primaryPort = runtimeController.serverPort
             val bridgePort = runtimeController.authBridgePort
 
-            // Query guest processes if Linux is running
             val guestProcessMap = try {
                 if (runtimeController.linuxRuntime.state.value.isRunning) {
                     val ssOutput = runtimeController.linuxRuntime.execute("ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null").getOrDefault("")
@@ -1267,7 +1241,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val ports = portScanner.scanPorts(
-                primaryVsCodePort = primaryPort,
+                primaryServerPort = primaryPort,
                 authBridgePort = bridgePort,
                 guestProcessMap = guestProcessMap
             )
@@ -1294,7 +1268,7 @@ class MainActivity : AppCompatActivity() {
                         urlView.text = port.url
 
                         btnOpen.setOnClickListener {
-                            if (port.isPrimaryVsCode) {
+                            if (port.isPrimaryServer || port.isPrimaryVsCode) {
                                 showEditorView()
                             } else {
                                 try {
@@ -1331,17 +1305,16 @@ class MainActivity : AppCompatActivity() {
         val info = aboutInfoProvider.getAboutInfo()
         tvAboutAppVer.text = info.appVersion
         tvAboutDistro.text = info.linuxDistro
-        tvAboutVsCode.text = info.vsCodeVersion
+        tvAboutAntigravity.text = info.antigravityVersion
         tvAboutAndroid.text = "${info.androidVersion} (API ${info.sdkInt})"
         tvAboutDevice.text = info.deviceModel
         tvAboutCpu.text = "${info.cpuArch} • ${info.kernelVersion}"
 
-        // Asynchronously query live VS Code CLI version
         lifecycleScope.launch {
             val dynamicVer = withContext(Dispatchers.IO) {
-                aboutInfoProvider.resolveDynamicVsCodeVersion(runtimeController.vscodeCli)
+                aboutInfoProvider.resolveDynamicAntigravityVersion(runtimeController.antigravityManager)
             }
-            tvAboutVsCode.text = dynamicVer
+            tvAboutAntigravity.text = dynamicVer
         }
     }
 
@@ -1350,8 +1323,8 @@ class MainActivity : AppCompatActivity() {
         val msg = StringBuilder()
             .append("Projects Directory:\n${paths.guestProjectsPath}\n\n")
             .append("Rootfs Location:\n${paths.rootfsDir.absolutePath}\n\n")
-            .append("VS Code CLI Data:\n${paths.guestVsCodeDataDir}\n\n")
-            .append("Server Port:\n${runtimeController.serverPort ?: "Inactive"}")
+            .append("Antigravity Data:\n${paths.guestAntigravityDataDir}\n\n")
+            .append("Local Server Port:\n${runtimeController.serverPort ?: "Inactive"}")
             .toString()
 
         MaterialAlertDialogBuilder(this)
@@ -1482,23 +1455,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        webViewManager.onResume()
+        webViewManager.resume()
         updatePortsList()
         updateWorkspaceSummary()
     }
 
     override fun onPause() {
         super.onPause()
-        webViewManager.onPause()
-    }
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (event != null && webViewAttached && editorContainer.visibility == View.VISIBLE) {
-            if (webViewManager.handleKeyEvent(event)) {
-                return true
-            }
-        }
-        return super.onKeyDown(keyCode, event)
+        webViewManager.pause()
     }
 
     override fun onDestroy() {

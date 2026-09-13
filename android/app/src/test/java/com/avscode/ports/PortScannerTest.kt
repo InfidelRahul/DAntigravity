@@ -67,11 +67,11 @@ class PortScannerTest {
         assertEquals("http://127.0.0.1:3000", p3000?.url)
         assertFalse(p3000?.isPrimaryVsCode ?: true)
 
-        val pVsCode = ports.find { it.port == 33107 }
-        assertNotNull(pVsCode)
-        assertEquals("VS Code Server", pVsCode?.serviceName)
-        assertEquals("http://127.0.0.1:33107", pVsCode?.url)
-        assertTrue(pVsCode?.isPrimaryVsCode ?: false)
+        val pServer = ports.find { it.port == 33107 }
+        assertNotNull(pServer)
+        assertEquals("Antigravity Server", pServer?.serviceName)
+        assertEquals("http://127.0.0.1:33107", pServer?.url)
+        assertTrue(pServer?.isPrimaryServer ?: false)
 
         assertNull(ports.find { it.port == 33105 })
     }

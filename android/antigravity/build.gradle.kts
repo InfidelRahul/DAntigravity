@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.avscode.vscode"
+    namespace = "com.avscode.antigravity"
     compileSdk = 36
 
     defaultConfig {
@@ -43,3 +43,4 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
     testImplementation("junit:junit:4.13.2")
 }
+

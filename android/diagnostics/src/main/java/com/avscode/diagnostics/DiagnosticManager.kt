@@ -86,10 +86,10 @@ class DiagnosticManager(private val context: Context) {
             }
         }
 
-        // Check VS Code CLI
-        if (report.vscodeInfo.installed) {
-            if (!report.vscodeInfo.binaryExists) {
-                issues.add("CRITICAL: VS Code CLI binary missing")
+        // Check Antigravity CLI
+        if (report.antigravityInfo.installed) {
+            if (!report.antigravityInfo.binaryExists) {
+                issues.add("CRITICAL: Antigravity CLI binary missing")
                 criticalIssues++
             }
         }

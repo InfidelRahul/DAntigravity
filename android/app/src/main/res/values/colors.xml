@@ -6,8 +6,10 @@
     <color name="surface_color">#FFFFFF</color>
     <color name="card_background">#FFFFFF</color>
     <color name="card_stroke">#E0E0E0</color>
-    <color name="vscode_background">#1E1E1E</color>
     <color name="loading_background">#F8F9FA</color>
+    <color name="editor_background">#1E1E1E</color>
+    <color name="antigravity_background">#1E1E1E</color>
+    <color name="vscode_background">#1E1E1E</color>
     <color name="accent">#007ACC</color>
     <color name="accent_container">#E1F0FF</color>
     <color name="text_primary">#1F1F1F</color>
