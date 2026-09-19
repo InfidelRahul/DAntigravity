@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.avscode.rootfs"
+    namespace = "com.droidantigravity.rootfs"
     compileSdk = 36
 
     defaultConfig {

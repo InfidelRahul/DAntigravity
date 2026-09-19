@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project("avscode-runtime" LANGUAGES C CXX ASM)
+project("droidantigravity-runtime" LANGUAGES C CXX ASM)
 
 # Ensure all shared libraries and executables output to the top binary dir for AGP packaging
 if(DEFINED CMAKE_LIBRARY_OUTPUT_DIRECTORY)
@@ -17,7 +17,6 @@ set(PROOT_CANDIDATE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/../../../../proot-repo"
     "$ENV{PROOT_REPO}"
     "$ENV{GITHUB_WORKSPACE}/proot-repo"
-    "/workspaces/AVSCode/proot-repo"
 )
 
 set(PROOT_REPO_DIR "")
@@ -51,14 +50,14 @@ message(STATUS "Including LinuxDroid PRoot from: ${PROOT_REPO_DIR}")
 add_subdirectory("${PROOT_REPO_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/proot_build")
 
 # AVscode Native Spawner
-add_library(avscodespawn SHARED "${CMAKE_CURRENT_SOURCE_DIR}/avscode_spawn.c")
-target_compile_options(avscodespawn PRIVATE
+add_library(droidantigravityspawn SHARED "${CMAKE_CURRENT_SOURCE_DIR}/droidantigravity_spawn.c")
+target_compile_options(droidantigravityspawn PRIVATE
     -Wall -Wextra -O2
     -Wno-implicit-function-declaration
     -Wno-error=implicit-function-declaration
 )
-target_link_libraries(avscodespawn log android)
+target_link_libraries(droidantigravityspawn log android)
 
 if(ANDROID)
-    target_link_options(avscodespawn PRIVATE "-Wl,-z,max-page-size=16384")
+    target_link_options(droidantigravityspawn PRIVATE "-Wl,-z,max-page-size=16384")
 endif()

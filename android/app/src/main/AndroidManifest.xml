@@ -1,71 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Internet access for downloading rootfs and VS Code Server -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    
-    <!-- Storage access for Linux userspace -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
-        android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
-        android:maxSdkVersion="32"
-        tools:ignore="ScopedStorage" />
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
-        tools:ignore="ScopedStorage" />
-    
-    <!-- Foreground service for keeping Linux runtime alive -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    
-    <!-- For managing processes -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:name=".AVscodeApplication"
+        android:name=".DroidAntigravityApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
-        android:requestLegacyExternalStorage="true"
-        android:theme="@style/Theme.AVscode"
-        android:usesCleartextTraffic="true"
-        tools:targetApi="34">
+        android:theme="@style/Theme.DroidAntigravity"
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|density"
             android:exported="true"
             android:launchMode="singleTask"
-            android:theme="@style/Theme.AVscode"
+            android:theme="@style/Theme.DroidAntigravity"
             android:windowSoftInputMode="adjustResize">
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- Handle external auth callbacks and deep links (vscode://, vscode-insiders://, avscode://) -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="vscode" />
-                <data android:scheme="vscode-insiders" />
-                <data android:scheme="avscode" />
-            </intent-filter>
         </activity>
 
-
-        <!-- Foreground service for Linux runtime -->
         <service
             android:name=".runtime.LinuxRuntimeService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-
     </application>
-
 </manifest>

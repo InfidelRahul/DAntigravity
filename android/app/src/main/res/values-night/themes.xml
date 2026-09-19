@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme (Dark) -->
-    <style name="Theme.AVscode" parent="Theme.Material3.DayNight.NoActionBar">
+    <style name="Theme.DroidAntigravity" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:statusBarColor">@color/status_bar</item>
         <item name="android:navigationBarColor">@color/navigation_bar</item>
         <item name="android:windowBackground">@color/window_background</item>
@@ -13,7 +13,7 @@
     </style>
 
     <!-- Loading screen theme -->
-    <style name="Theme.AVscode.Loading" parent="Theme.AVscode">
+    <style name="Theme.DroidAntigravity.Loading" parent="Theme.DroidAntigravity">
         <item name="android:windowBackground">@color/window_background</item>
     </style>
 </resources>

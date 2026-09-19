@@ -1,10 +1,10 @@
-# AVSCode Unified CI/CD Pipeline
+# DroidAntigravity Unified CI/CD Pipeline
 
 ## Overview
 
-This directory contains the single, authoritative GitHub Actions workflow for building, testing, signing, and releasing AVSCode.
+This directory contains the single, authoritative GitHub Actions workflow for building, testing, signing, and releasing DroidAntigravity.
 
-## Workflow: `ci.yml` (AVSCode CI & Signed Release Build)
+## Workflow: `ci.yml` (DroidAntigravity CI & Signed Release Build)
 
 **Triggers:**
 - Push to `main` and `develop`
@@ -21,13 +21,13 @@ This directory contains the single, authoritative GitHub Actions workflow for bu
 6. **Run Unit Tests**: Executes `./gradlew test` across all modules.
 7. **Build Signed Release APK**: Executes `./gradlew assembleRelease` generating a fully signed release APK.
 8. **Verify Signature**: Verifies APK signature scheme (v1/v2/v3) with `apksigner`.
-9. **Upload Signed APK Artifact**: Artifact `avscode-signed-release-apk` retained for 7 days.
+9. **Upload Signed APK Artifact**: Artifact `droidantigravity-signed-release-apk` retained for 7 days.
 10. **Publish GitHub Release**: Automatically creates GitHub release when triggered by version tag `v*` or manual dispatch.
 11. **Upload Failure Logs**: Diagnostic reports uploaded on build failure.
 
 ## Artifacts
 
-- **`avscode-signed-release-apk`**: `app-release.apk` (Signed Release APK)
+- **`droidantigravity-signed-release-apk`**: `app-release.apk` (Signed Release APK)
 
 ## Usage
 

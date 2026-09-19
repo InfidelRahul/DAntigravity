@@ -1,4 +1,4 @@
-name: AVSCode CI & Signed Release Build
+name: DroidAntigravity CI & Signed Release Build
 
 on:
   push:
@@ -69,13 +69,13 @@ jobs:
           echo "Generating automatic release keystore..."
           keytool -genkeypair -v \
             -keystore android/release.keystore \
-            -alias avscode \
+            -alias droidantigravity \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
-            -storepass avscode123 \
-            -keypass avscode123 \
-            -dname "CN=AVSCode, OU=Mobile, O=AVSCode, L=San Francisco, S=CA, C=US"
+            -storepass droidantigravity123 \
+            -keypass droidantigravity123 \
+            -dname "CN=DroidAntigravity, OU=Mobile, O=DroidAntigravity, L=San Francisco, S=CA, C=US"
         fi
 
     - name: Run Unit Tests
@@ -85,9 +85,9 @@ jobs:
 
     - name: Build Signed Release APK
       env:
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'avscode123' }}
-        KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'avscode' }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'avscode123' }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'droidantigravity123' }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'droidantigravity' }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'droidantigravity123' }}
       run: |
         cd android
         ./gradlew assembleRelease --no-configuration-cache --stacktrace
@@ -111,7 +111,7 @@ jobs:
     - name: Upload Signed Release APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: avscode-signed-release-apk
+        name: droidantigravity-signed-release-apk
         path: android/app/build/outputs/apk/release/app-release.apk
         retention-days: 7
         if-no-files-found: error

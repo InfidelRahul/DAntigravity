@@ -1,0 +1,215 @@
+package com.droidantigravity
+
+import android.content.Context
+import com.droidantigravity.antigravity.AntigravityManager
+import com.droidantigravity.core.AppPaths
+import com.droidantigravity.core.AppState
+import com.droidantigravity.core.AvsLogger
+import com.droidantigravity.core.Result
+import com.droidantigravity.core.runCatchingResult
+import com.droidantigravity.rootfs.RootfsInstaller
+import com.droidantigravity.runtime.LinuxRuntimeService
+import com.droidantigravity.runtime.PRootRuntime
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+/**
+ * Application-level lifecycle coordinator.
+ *
+ * Android owns lifecycle. Linux owns the development environment. Antigravity
+ * owns its Remote Control web application. This class only coordinates them.
+ */
+class RuntimeController private constructor(private val context: Context) {
+
+    companion object {
+        private const val TAG = "RuntimeController"
+
+        @Volatile private var instance: RuntimeController? = null
+
+        fun getInstance(context: Context): RuntimeController =
+            instance ?: synchronized(this) {
+                instance ?: RuntimeController(context.applicationContext).also { instance = it }
+            }
+    }
+
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val mutex = Mutex()
+
+    val paths = AppPaths.getInstance(context)
+    val rootfsInstaller = RootfsInstaller(context)
+    val linuxRuntime = PRootRuntime(context, rootfsInstaller)
+    val antigravityManager = AntigravityManager(context, linuxRuntime)
+
+    private val _appState = MutableStateFlow<AppState>(AppState.NotInstalled)
+    val appState = _appState.asStateFlow()
+
+    private val _logs = MutableSharedFlow<String>(replay = 200)
+    val logs: SharedFlow<String> = _logs.asSharedFlow()
+
+    init {
+        updateInitialState()
+    }
+
+    fun updateInitialState() {
+        _appState.value = when {
+            !rootfsInstaller.isInstalled() -> AppState.NotInstalled
+            !linuxRuntime.state.value.isRunning -> AppState.RootfsReady
+            !antigravityManager.isInstalled() -> AppState.LinuxReady
+            antigravityManager.state.isRunning &&
+                antigravityManager.currentRemoteControlUrl() != null ->
+                AppState.Ready(antigravityManager.currentRemoteControlUrl()!!)
+            else -> AppState.AntigravityReady
+        }
+    }
+
+    private suspend fun log(message: String) {
+        AvsLogger.i(TAG, message)
+        _logs.emit(message)
+    }
+
+    /**
+     * Full local startup:
+     * rootfs -> Linux -> real agy -> Remote Control -> WebView URL.
+     */
+    suspend fun startAll(forceRestart: Boolean = false): Result<String> = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            if (!forceRestart) {
+                antigravityManager.currentRemoteControlUrl()?.let {
+                    if (antigravityManager.state.isRunning) return@withContext Result.Success(it)
+                }
+            }
+
+            runCatchingResult {
+                try {
+                    LinuxRuntimeService.start(context)
+                } catch (e: Exception) {
+                    AvsLogger.w(TAG, "Foreground service could not start: ${e.message}")
+                }
+
+                ensureRootfs()
+                ensureLinux()
+                ensureAntigravity()
+
+                _appState.value = AppState.StartingAntigravityServer(
+                    "Starting Antigravity Remote Control…"
+                )
+                log("[Antigravity] Starting official agy with Remote Control.")
+
+                val url = antigravityManager.start().getOrThrow()
+                _appState.value = AppState.Ready(url, "Antigravity")
+                log("[Antigravity] Remote Control is ready.")
+                url
+            }.also { result ->
+                if (result.isFailure) {
+                    val error = result.exceptionOrNull()!!
+                    _appState.value = AppState.AntigravityFailed(
+                        error.message ?: "Unable to start Antigravity",
+                        error
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun ensureRootfs() {
+        if (rootfsInstaller.isInstalled()) {
+            _appState.value = AppState.RootfsReady
+            log("[Rootfs] Existing Ubuntu rootfs is ready.")
+            return
+        }
+
+        log("[Rootfs] Installing Ubuntu ARM64 rootfs.")
+        rootfsInstaller.install { progress, status ->
+            _appState.value =
+                if (progress < 0.5f) {
+                    AppState.DownloadingRootfs(progress * 2f, status)
+                } else {
+                    AppState.ExtractingRootfs((progress - 0.5f) * 2f, status)
+                }
+            AvsLogger.i(TAG, "[Rootfs] $status")
+        }.getOrThrow()
+
+        _appState.value = AppState.RootfsReady
+        log("[Rootfs] Rootfs installation completed.")
+    }
+
+    private suspend fun ensureLinux() {
+        if (!linuxRuntime.state.value.isRunning) {
+            _appState.value = AppState.StartingLinux
+            log("[Linux] Starting PRoot userspace.")
+            linuxRuntime.start().getOrThrow()
+        }
+
+        _appState.value = AppState.VerifyingLinux
+        linuxRuntime.verifyGuestUserspace { output ->
+            AvsLogger.d(TAG, "[Linux] $output")
+        }.getOrThrow()
+
+        _appState.value = AppState.LinuxReady
+        log("[Linux] Guest userspace verified.")
+    }
+
+    private suspend fun ensureAntigravity() {
+        if (!antigravityManager.isInstalled()) {
+            _appState.value = AppState.InstallingAntigravity(
+                0.1f,
+                "Installing the official Antigravity CLI…"
+            )
+            log("[Antigravity] Installing official CLI inside Linux HOME.")
+            antigravityManager.install().getOrThrow()
+        }
+
+        _appState.value = AppState.AntigravityReady
+        val version = antigravityManager.version().getOrNull()?.trim()
+        if (!version.isNullOrBlank()) {
+            log("[Antigravity] $version")
+        }
+    }
+
+    suspend fun stopAntigravity(): Result<Unit> = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            runCatchingResult {
+                _appState.value = AppState.Stopping
+                antigravityManager.stop()
+                _appState.value = AppState.LinuxReady
+                log("[Antigravity] Stopped. Linux remains running.")
+            }
+        }
+    }
+
+    suspend fun stopAll(): Result<Unit> = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            runCatchingResult {
+                _appState.value = AppState.Stopping
+                antigravityManager.stop()
+                linuxRuntime.stop()
+                LinuxRuntimeService.stop(context)
+                updateInitialState()
+                log("[Runtime] Linux and Antigravity stopped.")
+            }
+        }
+    }
+
+    suspend fun restartAll(): Result<String> {
+        stopAll()
+        return startAll(forceRestart = true)
+    }
+
+    suspend fun executeGuestCommand(
+        command: String,
+        onOutput: (String) -> Unit = {}
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        linuxRuntime.executeStreaming(command, onOutput)
+    }
+
+    fun isLinuxRunning(): Boolean = linuxRuntime.state.value.isRunning
+}

@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.avscode.web"
+    namespace = "com.droidantigravity.web"
     compileSdk = 36
 
     defaultConfig {

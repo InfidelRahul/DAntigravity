@@ -1,6 +1,6 @@
-# AVSCode Architecture & Technical Specification
+# DroidAntigravity Architecture & Technical Specification
 
-AVSCode runs full Visual Studio Code (via Microsoft's official VS Code CLI `code serve-web`) locally on Android devices without requiring root access. The host Android application serves the Web UI through a hardware-accelerated, edge-to-edge Android WebView connected to `http://127.0.0.1:<dynamic-port>`, while all computation, filesystem operations, compiler toolchains, and language servers execute in a self-contained ARM64 Linux userspace managed via PRoot. A dedicated loopback `AuthBridgeServer` handles Android ↔ Linux authentication flows.
+DroidAntigravity runs full Visual Studio Code (via Microsoft's official VS Code CLI `code serve-web`) locally on Android devices without requiring root access. The host Android application serves the Web UI through a hardware-accelerated, edge-to-edge Android WebView connected to `http://127.0.0.1:<dynamic-port>`, while all computation, filesystem operations, compiler toolchains, and language servers execute in a self-contained ARM64 Linux userspace managed via PRoot. A dedicated loopback `AuthBridgeServer` handles Android ↔ Linux authentication flows.
 
 ---
 
@@ -30,7 +30,7 @@ AVSCode runs full Visual Studio Code (via Microsoft's official VS Code CLI `code
 │                                            ▼                │
 │                                ┌────────────────────────┐   │
 │                                │   NativeSpawn (JNI)    │   │
-│                                │    (avscode_spawn)     │   │
+│                                │    (droidantigravity_spawn)     │   │
 │                                └───────────┬────────────┘   │
 └────────────────────────────────────────────┼────────────────┘
                                              │
@@ -50,7 +50,7 @@ AVSCode runs full Visual Studio Code (via Microsoft's official VS Code CLI `code
 │   │              Ubuntu ARM64 Userspace                 │   │
 │   │  - /bin/bash, /usr/bin/python3, /usr/bin/git        │   │
 │   │  - /usr/local/bin/code serve-web (Local Server)     │   │
-│   │  - /usr/local/bin/avscode-auth (Auth Bridge helper) │   │
+│   │  - /usr/local/bin/droidantigravity-auth (Auth Bridge helper) │   │
 │   │  - /home/user/projects (Persistent user workspaces) │   │
 │   └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -62,7 +62,7 @@ AVSCode runs full Visual Studio Code (via Microsoft's official VS Code CLI `code
 
 ### 1. Host Application & Lifecycle Management
 
-- **`RuntimeController` (`com.avscode.RuntimeController`)**:
+- **`RuntimeController` (`com.droidantigravity.RuntimeController`)**:
   - Authoritative, thread-safe singleton state machine.
   - Coordinates the multi-step boot process:
     1. Rootfs verification & extraction.
@@ -71,17 +71,17 @@ AVSCode runs full Visual Studio Code (via Microsoft's official VS Code CLI `code
     4. One-time guest development tool bootstrap (`bootstrap.sh`).
     5. Microsoft VS Code CLI verification & installation (`/usr/local/bin/code`).
     6. `AuthBridgeServer` startup on ephemeral local loopback port (`127.0.0.1:<bridgePort>`).
-    7. Guest helper injection (`/usr/local/bin/avscode-auth`).
+    7. Guest helper injection (`/usr/local/bin/droidantigravity-auth`).
     8. Local VS Code Server (`code serve-web`) supervision on dynamic port with HTTP health probing.
     9. State transition to `AppState.Ready(url)` for WebView consumption.
-- **`AuthBridgeServer` (`com.avscode.core.AuthBridgeServer`)**:
+- **`AuthBridgeServer` (`com.droidantigravity.core.AuthBridgeServer`)**:
   - Lightweight, zero-dependency local loopback HTTP IPC service running on Android host.
   - Provides endpoints for guest processes: `/health`, `POST /auth/request`, `/auth/callback`, and single-use `GET /auth/token`.
   - Dispatches browser intents on Android host when guest processes request OAuth or web authorization.
-- **`LinuxRuntimeService` (`com.avscode.runtime.LinuxRuntimeService`)**:
+- **`LinuxRuntimeService` (`com.droidantigravity.runtime.LinuxRuntimeService`)**:
   - Android Foreground Service with type `FOREGROUND_SERVICE_TYPE_DATA_SYNC`.
   - Holds a wake lock and displays ongoing status notifications to prevent Android OOM kills while long-running compilation or local web servers run in the background.
-- **`MainActivity` (`com.avscode.MainActivity`)**:
+- **`MainActivity` (`com.droidantigravity.MainActivity`)**:
   - Pure view controller that observes `RuntimeController.appState`.
   - Implements modern edge-to-edge support with `WindowInsetsCompat` across status bars, display cutouts/notches, gesture navigation, and soft keyboard (IME).
   - Handles fullscreen display, back button dispatch via `OnBackPressedDispatcher`, and hardware keyboard shortcut pass-through to the WebView.
@@ -95,7 +95,7 @@ AVSCode runs full Visual Studio Code (via Microsoft's official VS Code CLI `code
   - Built from official upstream source (`https://github.com/LinuxDroidapp/proot.git`) tracked as a submodule.
   - Compiles `libproot.so`, `libproot_loader.so`, and `liblinuxdroidspawn.so`.
   - **16KB ELF Alignment**: Configured with `-Wl,-z,max-page-size=16384` for compliance with Android 15/16 16KB memory page size standards.
-- **Native Process Spawner (`avscode_spawn.c`)**:
+- **Native Process Spawner (`droidantigravity_spawn.c`)**:
   - Custom POSIX JNI spawner providing process group isolation (`setpgid(0, 0)`).
   - Configures child environment, file descriptor redirection, non-blocking pipes, and group killing (`kill(-pid, sig)`).
 - **Filesystem Mounts**:

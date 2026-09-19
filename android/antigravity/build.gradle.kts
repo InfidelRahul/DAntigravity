@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.avscode.antigravity"
+    namespace = "com.droidantigravity.antigravity"
     compileSdk = 36
 
     defaultConfig {

@@ -70,9 +70,9 @@ else
     if [ ! -f "${ANDROID_DIR}/release.keystore" ]; then
         echo "Generating release keystore for local build..."
         keytool -genkeypair -v -keystore "${ANDROID_DIR}/release.keystore" \
-            -alias avscode -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass avscode123 -keypass avscode123 \
-            -dname "CN=AVSCode, OU=Mobile, O=AVSCode, L=City, S=State, C=US"
+            -alias droidantigravity -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass droidantigravity123 -keypass droidantigravity123 \
+            -dname "CN=DroidAntigravity, OU=Mobile, O=DroidAntigravity, L=City, S=State, C=US"
     fi
     ./gradlew assembleRelease --no-configuration-cache
     APK="${ANDROID_DIR}/app/build/outputs/apk/release/app-release.apk"

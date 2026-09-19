@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.avscode"
+    namespace = "com.droidantigravity"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.avscode"
+        applicationId = "com.droidantigravity"
         minSdk = 28
         targetSdk = 36
         versionCode = 1
@@ -22,23 +22,18 @@ android {
         }
     }
 
-    signingConfigs {
-        create("release") {
-            val customKeystore = System.getenv("KEYSTORE_FILE")?.let { file(it) }
-            val defaultKeystore = file("${rootDir}/release.keystore")
-            val targetKeystore = when {
-                customKeystore?.exists() == true -> customKeystore
-                defaultKeystore.exists() -> defaultKeystore
-                else -> null
-            }
+    val releaseKeystore = System.getenv("KEYSTORE_FILE")?.let { file(it) }
 
-            if (targetKeystore != null) {
-                storeFile = targetKeystore
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "avscode123"
-                keyAlias = System.getenv("KEY_ALIAS") ?: "avscode"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "avscode123"
-            } else {
-                initWith(getByName("debug"))
+    signingConfigs {
+        if (releaseKeystore?.exists() == true) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                    ?: error("KEYSTORE_PASSWORD is required for release signing")
+                keyAlias = System.getenv("KEY_ALIAS")
+                    ?: error("KEY_ALIAS is required for release signing")
+                keyPassword = System.getenv("KEY_PASSWORD")
+                    ?: error("KEY_PASSWORD is required for release signing")
             }
         }
     }
@@ -46,7 +41,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            if (releaseKeystore?.exists() == true) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
@@ -75,8 +72,8 @@ android {
     }
 
     lint {
-        abortOnError = false
-        checkReleaseBuilds = false
+        abortOnError = true
+        checkReleaseBuilds = true
     }
 }
 

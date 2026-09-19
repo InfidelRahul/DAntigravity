@@ -1,11 +1,11 @@
-# AVSCode — VS Code for Android
+# DroidAntigravity — VS Code for Android
 
-[![AVSCode CI & Signed Release Build](https://github.com/InfidelRahul/AVSCode/actions/workflows/ci.yml/badge.svg)](https://github.com/InfidelRahul/AVSCode/actions/workflows/ci.yml)
+[![DroidAntigravity CI & Signed Release Build](https://github.com/InfidelRahul/DroidAntigravity/actions/workflows/ci.yml/badge.svg)](https://github.com/InfidelRahul/DroidAntigravity/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/Platform-Android%209.0%2B%20(API%2028--36)-green.svg)](https://developer.android.com)
 [![Architecture](https://img.shields.io/badge/Architecture-ARM64%20(16KB%20Aligned)-blue.svg)](https://developer.android.com/guide/practices/page-sizes)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](LICENSE)
 
-**AVSCode** is a native Android application that runs a complete, persistent Visual Studio Code environment locally on Android devices without requiring root access.
+**DroidAntigravity** is a native Android application that runs a complete, persistent Visual Studio Code environment locally on Android devices without requiring root access.
 
 The application embeds an Ubuntu ARM64 Linux userspace powered by **LinuxDroid PRoot**, manages the official **Microsoft Visual Studio Code CLI (`code serve-web`)** on local loopback, provides a dedicated **Android ↔ Linux Authentication Bridge**, and renders a fully responsive, hardware-accelerated **Android WebView** user interface with edge-to-edge safe area support.
 
@@ -18,7 +18,7 @@ The application embeds an Ubuntu ARM64 Linux userspace powered by **LinuxDroid P
 - **Dedicated Android ↔ Linux Auth Bridge**: Lightweight loopback IPC endpoint enabling guest tools to trigger Android browser auth flows and receive single-use, session-scoped callbacks.
 - **Edge-to-Edge Safe Area Insets**: Uses `WindowInsetsCompat` to adapt dynamically to status bars, display cutouts/notches, gesture navigation bars, and soft keyboards across all Android versions (including Android 15 & 16).
 - **Streamlined UI Experience**: Post-setup landing view is the VS Code editor directly, with the Linux terminal retained as a toggleable diagnostic/CLI console.
-- **Android 15/16 Ready**: All native binaries (`libproot.so`, `libavscodespawn.so`, etc.) compiled with **16KB page-size alignment** (`-Wl,-z,max-page-size=16384`).
+- **Android 15/16 Ready**: All native binaries (`libproot.so`, `libdroidantigravityspawn.so`, etc.) compiled with **16KB page-size alignment** (`-Wl,-z,max-page-size=16384`).
 - **Complete Development Toolchain**: Ubuntu ARM64 userspace with Python 3, Git, Node.js, npm, and apt package manager.
 - **Robust Process Supervision**: Custom JNI process spawner with POSIX process group isolation (`setpgid`) and clean group termination.
 - **Persistent Workspace**: User files saved permanently in `/home/user/projects` inside internal app storage.
@@ -68,7 +68,7 @@ The application embeds an Ubuntu ARM64 Linux userspace powered by **LinuxDroid P
 │   │              Ubuntu ARM64 Userspace                 │   │
 │   │  - /bin/bash, Python 3, Git                         │   │
 │   │  - /usr/local/bin/code serve-web (Local Server)     │   │
-│   │  - /usr/local/bin/avscode-auth (Auth helper)        │   │
+│   │  - /usr/local/bin/droidantigravity-auth (Auth helper)        │   │
 │   │  - /home/user/projects (Workspaces)                 │   │
 │   └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
@@ -80,7 +80,7 @@ For in-depth architectural details, refer to [docs/ARCHITECTURE.md](docs/ARCHITE
 
 ## Prerequisites
 
-To build AVSCode locally from source, ensure you have:
+To build DroidAntigravity locally from source, ensure you have:
 
 - **Operating System**: Linux or macOS (x86_64 or Apple Silicon)
 - **JDK**: Java Development Kit 21 (Temurin or OpenJDK recommended)
@@ -96,8 +96,8 @@ To build AVSCode locally from source, ensure you have:
 ### 1. Clone Repository & Submodules
 
 ```bash
-git clone --recursive https://github.com/InfidelRahul/AVSCode.git
-cd AVSCode
+git clone --recursive https://github.com/InfidelRahul/DroidAntigravity.git
+cd DroidAntigravity
 ```
 
 If already cloned without submodules:
@@ -149,7 +149,7 @@ cd android
    ```bash
    adb install android/app/build/outputs/apk/release/app-release.apk
    ```
-3. Launch **AVSCode**. On first boot:
+3. Launch **DroidAntigravity**. On first boot:
    - Downloads and verifies the Ubuntu ARM64 userspace.
    - Configures guest networking and DNS.
    - Unpacks and starts VS Code Server.
@@ -160,14 +160,14 @@ cd android
 ## Project Structure
 
 ```
-AVSCode/
+DroidAntigravity/
 ├── .github/workflows/
 │   ├── ci.yml                 # Unified CI & Signed Release Build workflow
 │   └── README.md              # CI/CD workflow documentation
 ├── android/
 │   ├── app/                   # Android UI, MainActivity, Foreground Service
 │   ├── core/                  # AppPaths, AvsLogger, RuntimeState models
-│   ├── runtime/               # PRoot engine, JNI avscode_spawn, LinuxRuntime
+│   ├── runtime/               # PRoot engine, JNI droidantigravity_spawn, LinuxRuntime
 │   ├── rootfs/                # RootfsInstaller (Ubuntu ARM64 base + DNS/APT)
 │   ├── vscode/                # VsCodeCliManager (Microsoft VS Code CLI & Tunnel)
 │   ├── web/                   # VsCodeWebView (Chromium WebView & keyboard bridge)
@@ -183,7 +183,7 @@ AVSCode/
 
 ## License & Acknowledgments
 
-- **AVSCode**: Apache License 2.0
+- **DroidAntigravity**: Apache License 2.0
 - **PRoot**: GPL v2 ([LinuxDroid](https://github.com/LinuxDroidapp/proot))
 - **VS Code CLI**: Microsoft Corporation ([Visual Studio Code](https://code.visualstudio.com))
 - **Ubuntu Base**: Canonical Ltd.

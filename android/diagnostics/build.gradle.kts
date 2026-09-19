@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.avscode.diagnostics"
+    namespace = "com.droidantigravity.diagnostics"
     compileSdk = 36
 
     defaultConfig {
