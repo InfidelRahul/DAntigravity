@@ -27,8 +27,18 @@ if [ ! -f "${PROOT_REPO}/CMakeLists.txt" ]; then
 fi
 
 # 2. Check Java / Android SDK / NDK Environment
-if [ -d "/usr/local/sdkman/candidates/java/21.0.12+1-ms" ]; then
-    export JAVA_HOME="/usr/local/sdkman/candidates/java/21.0.12+1-ms"
+if [ -z "${JAVA_HOME:-}" ] || [ ! -d "${JAVA_HOME:-}" ]; then
+    if [ -d "/usr/local/sdkman/candidates/java/21.0.12+1-ms" ]; then
+        export JAVA_HOME="/usr/local/sdkman/candidates/java/21.0.12+1-ms"
+    elif [ -d "/opt/jdk-17" ]; then
+        export JAVA_HOME="/opt/jdk-17"
+    elif [ -d "/opt/jdk-17.0.20.1+1" ]; then
+        export JAVA_HOME="/opt/jdk-17.0.20.1+1"
+    fi
+fi
+
+if [ -n "${JAVA_HOME:-}" ] && [ -d "${JAVA_HOME:-}" ]; then
+    export PATH="${JAVA_HOME}/bin:${PATH}"
 fi
 
 if [ -z "${ANDROID_HOME:-}" ] && [ -z "${ANDROID_SDK_ROOT:-}" ]; then
@@ -74,8 +84,17 @@ else
             -storepass droidantigravity123 -keypass droidantigravity123 \
             -dname "CN=DroidAntigravity, OU=Mobile, O=DroidAntigravity, L=City, S=State, C=US"
     fi
+    export KEYSTORE_FILE="${KEYSTORE_FILE:-${ANDROID_DIR}/release.keystore}"
+    export KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-droidantigravity123}"
+    export KEY_ALIAS="${KEY_ALIAS:-droidantigravity}"
+    export KEY_PASSWORD="${KEY_PASSWORD:-droidantigravity123}"
+
     ./gradlew assembleRelease --no-configuration-cache
-    APK="${ANDROID_DIR}/app/build/outputs/apk/release/app-release.apk"
+    if [ -f "${ANDROID_DIR}/app/build/outputs/apk/release/app-release.apk" ]; then
+        APK="${ANDROID_DIR}/app/build/outputs/apk/release/app-release.apk"
+    else
+        APK="${ANDROID_DIR}/app/build/outputs/apk/release/app-release-unsigned.apk"
+    fi
 fi
 
 if [ -f "$APK" ]; then

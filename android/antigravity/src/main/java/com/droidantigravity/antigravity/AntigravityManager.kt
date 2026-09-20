@@ -51,6 +51,20 @@ class AntigravityManager(
     val state: AntigravityState get() = _state.get()
 
     fun isInstalled(): Boolean {
+        if (!paths.rootfsInstallMarker.exists()) {
+            if (state != AntigravityState.RUNNING) {
+                _state.set(AntigravityState.NOT_INSTALLED)
+            }
+            return false
+        }
+
+        if (paths.hostAntigravityBin.exists() ||
+            File(paths.rootfsDir, "usr/local/bin/agy").exists() ||
+            File(paths.rootfsDir, "usr/bin/agy").exists()
+        ) {
+            return true
+        }
+
         val installed = try {
             val result = kotlinx.coroutines.runBlocking {
                 linuxRuntime.execute("command -v agy 2>/dev/null || true")
