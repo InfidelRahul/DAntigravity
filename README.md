@@ -187,3 +187,22 @@ DroidAntigravity/
 - **PRoot**: GPL v2 ([LinuxDroid](https://github.com/LinuxDroidapp/proot))
 - **VS Code CLI**: Microsoft Corporation ([Visual Studio Code](https://code.visualstudio.com))
 - **Ubuntu Base**: Canonical Ltd.
+
+
+## Current architecture boundary
+
+DroidAntigravity is intentionally a thin Android host for the official Google Antigravity CLI.
+
+The application provides:
+- a persistent ARM64 Linux/PRoot userspace;
+- installation and lifecycle management for the official `agy` CLI;
+- an Android foreground service so the Linux/CLI process can continue while the Activity is backgrounded;
+- Android WebView support for the official Antigravity Remote Control URL;
+- standard Android copy/share/open-in-browser actions;
+- diagnostics for the Android/Linux/process/WebView layers.
+
+The application does **not** implement Antigravity authentication, OAuth token entry, credential provisioning, credential storage, conversation storage, agent execution, or the Remote Control web UI. Those capabilities remain owned by the official CLI.
+
+The official Remote Control URL is a normal HTTPS URL and can be opened either in the in-app WebView or an external Android browser.
+
+See `docs/ARCHITECTURE.md` for the current architecture and migration boundary.

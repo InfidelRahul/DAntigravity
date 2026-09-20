@@ -163,68 +163,6 @@ class AntigravityManager internal constructor(
     }
 
     /**
-     * Pre-populates cache/onboarding.json so the CLI does not stall on the interactive
-     * theme selection / onboarding wizard.
-     */
-    internal fun ensureOnboardingCompleted(operationId: String? = null) {
-        try {
-            val cacheDir = File(paths.hostAntigravityDataDir, "antigravity-cli/cache")
-            cacheDir.mkdirs()
-            val onboardingFile = File(cacheDir, "onboarding.json")
-            if (!onboardingFile.exists()) {
-                val content = "{\n  \"consumerOnboardingComplete\": true,\n  \"enterpriseOnboardingComplete\": false,\n  \"onboardingComplete\": true\n}\n"
-                onboardingFile.writeText(content)
-                DiagnosticLogger.d(TAG, "onboarding_configured", "Pre-configured onboardingComplete in cache/onboarding.json", operationId = operationId)
-            }
-        } catch (e: Exception) {
-            DiagnosticLogger.w(TAG, "onboarding_config_failed", "Failed to pre-configure onboarding: ${e.message}", operationId = operationId)
-        }
-    }
-
-    /**
-     * Provisions official Antigravity OAuth credentials into ~/.gemini/antigravity-cli/antigravity-oauth-token
-     * from available host sources (Android app files, environment, or developer configuration).
-     */
-    internal fun ensureTokenProvisioned(operationId: String? = null) {
-        try {
-            val targetFile = File(paths.hostAntigravityDataDir, "antigravity-cli/antigravity-oauth-token")
-            if (targetFile.exists() && targetFile.length() > 0) {
-                return
-            }
-            val candidateFiles = listOfNotNull(
-                File("/root/.gemini/antigravity-cli/antigravity-oauth-token"),
-                context?.let { File(it.filesDir, "antigravity-oauth-token") },
-                context?.let { File(it.filesDir, "antigravity-cli/antigravity-oauth-token") }
-            )
-            for (candidate in candidateFiles) {
-                if (candidate.exists() && candidate.length() > 0) {
-                    targetFile.parentFile?.mkdirs()
-                    candidate.copyTo(targetFile, overwrite = true)
-                    targetFile.setReadable(true, true)
-                    targetFile.setWritable(true, true)
-                    DiagnosticLogger.i(TAG, "oauth_token_provisioned", "Provisioned Antigravity OAuth token from ${candidate.path}", operationId = operationId)
-                    return
-                }
-            }
-            val envToken = System.getenv("ANTIGRAVITY_OAUTH_TOKEN") ?: System.getenv("AGY_OAUTH_TOKEN")
-            if (!envToken.isNullOrBlank()) {
-                targetFile.parentFile?.mkdirs()
-                targetFile.writeText(envToken)
-                targetFile.setReadable(true, true)
-                targetFile.setWritable(true, true)
-                DiagnosticLogger.i(TAG, "oauth_token_provisioned_env", "Provisioned Antigravity OAuth token from environment", operationId = operationId)
-            }
-        } catch (e: Exception) {
-            DiagnosticLogger.w(TAG, "token_provision_failed", "Failed to provision token: ${e.message}", operationId = operationId)
-        }
-    }
-
-    fun hasValidToken(): Boolean {
-        val targetFile = File(paths.hostAntigravityDataDir, "antigravity-cli/antigravity-oauth-token")
-        return targetFile.exists() && targetFile.length() > 0
-    }
-
-    /**
      * Pre-populates trusted workspaces in ~/.gemini/antigravity-cli/settings.json
      * so the official CLI never blocks indefinitely on the interactive trust prompt.
      */
@@ -313,10 +251,9 @@ class AntigravityManager internal constructor(
         _state.set(AntigravityState.STARTING)
         remoteControlUrl = null
 
-        // 2. Pre-configure workspace, onboarding, and token
-        ensureWorkspaceTrusted(opId)
-        ensureOnboardingCompleted(opId)
-        ensureTokenProvisioned(opId)
+        // 2. Keep Antigravity-owned credentials and configuration untouched.
+        // The official CLI owns authentication, session persistence, onboarding and logout.
+        // DroidAntigravity only provides the Linux runtime and process lifecycle.
 
         // 3. Prepare log destinations (separate stdout and stderr)
         val combinedLog = paths.antigravityLogFile
@@ -334,7 +271,7 @@ class AntigravityManager internal constructor(
 
         // 4. CLI environment diagnostics
         val agyBin = if (paths.hostAntigravityBin.exists()) paths.guestAntigravityBin else "agy"
-        val guestCommand = "exec $agyBin --remote-control --dangerously-skip-permissions"
+        val guestCommand = "exec $agyBin --remote-control"
         val guestCwd = paths.guestHomePath
         val guestPath = "/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -471,6 +408,7 @@ class AntigravityManager internal constructor(
         val deadline = System.currentTimeMillis() + timeoutMs
         val startTime = System.currentTimeMillis()
         var trustConfirmed = false
+        var authNoticeLogged = false
         var lastLivenessCheck = System.currentTimeMillis()
         var lastStdoutSize = 0L
         var lastStderrSize = 0L
@@ -533,13 +471,15 @@ class AntigravityManager internal constructor(
                 }
             }
 
-            // 3. Early detection of fatal conditions
-            if (StartupOutputClassifier.isAuthenticationRequired(text)) {
-                DiagnosticLogger.w(TAG, "AUTHENTICATION_REQUIRED", "CLI reported authentication required", operationId = operationId)
-                throw AntigravityStartupException(
-                    AntigravityStartupError.AUTH_REQUIRED,
-                    "Antigravity requires authentication before starting Remote Control",
-                    details = DiagnosticSanitizer.redact(text),
+            // 3. Authentication is owned by the official CLI. Do not abort merely
+            // because it reports an authentication state while its browser flow may
+            // still be active. A process exit is classified below.
+            if (!authNoticeLogged && StartupOutputClassifier.isAuthenticationRequired(text)) {
+                authNoticeLogged = true
+                DiagnosticLogger.i(
+                    TAG,
+                    "AUTHENTICATION_REQUIRED",
+                    "Official CLI reported an authentication state; continuing to wait for its own authentication flow.",
                     operationId = operationId
                 )
             }

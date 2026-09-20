@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.webkit.CookieManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -16,7 +15,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
@@ -24,8 +22,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
-import android.widget.EditText
-import java.io.File
 import com.droidantigravity.antigravity.AntigravityStartupException
 import com.droidantigravity.core.AppState
 import com.droidantigravity.core.Result
@@ -54,10 +50,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var diagnosticIdText: TextView
     private lateinit var progress: ProgressBar
     private lateinit var buttonRow: LinearLayout
-    private lateinit var tokenButton: Button
     private lateinit var retryButton: Button
     private lateinit var viewLogsButton: Button
     private lateinit var exportLogsButton: Button
+    @Volatile private var currentRemoteControlUrl: String? = null
 
     @Volatile private var activeDiagnosticId: String? = null
 
@@ -106,6 +102,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         val webView = browser.createWebView()
+        webView.setOnLongClickListener {
+            showRemoteControlActions()
+            true
+        }
         webContainer.addView(
             webView,
             FrameLayout.LayoutParams(
@@ -156,14 +156,6 @@ class MainActivity : AppCompatActivity() {
             visibility = View.GONE
         }
 
-        tokenButton = Button(this).apply {
-            text = "Enter Token"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#7B1FA2"))
-            setOnClickListener { showTokenInputDialog() }
-            visibility = View.GONE
-        }
-
         retryButton = Button(this).apply {
             text = "Retry"
             setTextColor(Color.WHITE)
@@ -192,7 +184,6 @@ class MainActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { setMargins(8, 0, 8, 0) }
 
-        buttonRow.addView(tokenButton, btnLp)
         buttonRow.addView(retryButton, btnLp)
         buttonRow.addView(viewLogsButton, btnLp)
         buttonRow.addView(exportLogsButton, btnLp)
@@ -337,6 +328,7 @@ class MainActivity : AppCompatActivity() {
                 return@runOnUiThread
             }
 
+            currentRemoteControlUrl = url
             statusContainer.visibility = View.GONE
             buttonRow.visibility = View.GONE
             webContainer.visibility = View.VISIBLE
@@ -347,6 +339,31 @@ class MainActivity : AppCompatActivity() {
                 DiagnosticLogger.e(TAG, "webview_load_error", "Failed to load Remote Control URL: ${e.message}", e)
                 showError("Load Error", "Unable to open Antigravity Remote Control.", activeDiagnosticId)
             }
+        }
+    }
+
+    private fun showRemoteControlActions() {
+        val url = currentRemoteControlUrl ?: return
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Remote Control")
+            .setItems(arrayOf("Open in browser", "Copy URL")) { _, which ->
+                when (which) {
+                    0 -> openRemoteControlInBrowser(url)
+                    1 -> {
+                        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Antigravity Remote Control URL", url))
+                        Toast.makeText(this, "URL copied", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun openRemoteControlInBrowser(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: Exception) {
+            Toast.makeText(this, "No browser available", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -369,7 +386,7 @@ class MainActivity : AppCompatActivity() {
             progress.visibility = View.GONE
             statusTitle.text = "Google Sign In Required"
             statusTitle.visibility = View.VISIBLE
-            statusText.text = "$message\n\nOfficial Antigravity Remote Control requires Google authentication to establish the reverse tunnel."
+            statusText.text = "$message\n\nComplete authentication using the official Antigravity CLI flow, then tap Retry if necessary."
             if (!diagnosticId.isNullOrBlank()) {
                 diagnosticIdText.text = "Diagnostic ID: $diagnosticId"
                 diagnosticIdText.visibility = View.VISIBLE
@@ -377,53 +394,10 @@ class MainActivity : AppCompatActivity() {
                 diagnosticIdText.visibility = View.GONE
             }
             buttonRow.visibility = View.VISIBLE
-            tokenButton.visibility = View.VISIBLE
             retryButton.visibility = View.VISIBLE
             viewLogsButton.visibility = View.VISIBLE
             exportLogsButton.visibility = View.VISIBLE
         }
-    }
-
-    private fun showTokenInputDialog() {
-        val input = EditText(this).apply {
-            hint = "Paste antigravity-oauth-token JSON content"
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.GRAY)
-            setBackgroundColor(Color.parseColor("#212121"))
-            setPadding(32, 32, 32, 32)
-            typeface = Typeface.MONOSPACE
-            textSize = 12f
-            minLines = 4
-        }
-
-        val container = FrameLayout(this).apply {
-            setPadding(48, 24, 48, 12)
-            addView(input)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle("Antigravity OAuth Token")
-            .setMessage("Paste your official Antigravity OAuth credentials JSON:")
-            .setView(container)
-            .setPositiveButton("Save & Connect") { _, _ ->
-                val tokenContent = input.text.toString().trim()
-                if (tokenContent.isNotEmpty()) {
-                    try {
-                        val tokenFile = File(runtimeController.paths.hostAntigravityDataDir, "antigravity-cli/antigravity-oauth-token")
-                        tokenFile.parentFile?.mkdirs()
-                        tokenFile.writeText(tokenContent)
-                        tokenFile.setReadable(true, true)
-                        tokenFile.setWritable(true, true)
-                        Toast.makeText(this, "Token saved successfully", Toast.LENGTH_SHORT).show()
-                        startRuntime()
-                    } catch (e: Exception) {
-                        DiagnosticLogger.e(TAG, "token_save_failed", "Failed to save token: ${e.message}", e)
-                        Toast.makeText(this, "Failed to save token: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun showError(title: String, message: String, diagnosticId: String?) {
@@ -441,7 +415,6 @@ class MainActivity : AppCompatActivity() {
                 diagnosticIdText.visibility = View.GONE
             }
             buttonRow.visibility = View.VISIBLE
-            tokenButton.visibility = View.GONE
             retryButton.visibility = View.VISIBLE
             viewLogsButton.visibility = View.VISIBLE
             exportLogsButton.visibility = View.VISIBLE

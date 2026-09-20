@@ -302,16 +302,6 @@ class AntigravityManagerTest {
     }
 
     @Test
-    fun test19_ensureOnboardingCompletedCreatesFile() {
-        manager.ensureOnboardingCompleted()
-        val onboardingFile = File(testPaths.hostAntigravityDataDir, "antigravity-cli/cache/onboarding.json")
-        assertTrue(onboardingFile.exists())
-        val text = onboardingFile.readText()
-        assertTrue(text.contains("\"consumerOnboardingComplete\": true"))
-        assertTrue(text.contains("\"onboardingComplete\": true"))
-    }
-
-    @Test
     fun test20_ensureWorkspaceTrustedCreatesSettingsJson() {
         manager.ensureWorkspaceTrusted()
         val settingsFile = File(testPaths.hostAntigravityDataDir, "antigravity-cli/settings.json")
