@@ -12,7 +12,8 @@ object StartupOutputClassifier {
         val clean = RemoteControlUrlParser.stripAnsi(text)
         return clean.contains("trust the contents of this project", ignoreCase = true) ||
                clean.contains("trust this folder", ignoreCase = true) ||
-               (clean.contains("Do you trust", ignoreCase = true) && clean.contains("permission", ignoreCase = true))
+               clean.contains("Do you trust", ignoreCase = true) ||
+               clean.contains("permission to read, edit, and execute files here", ignoreCase = true)
     }
 
     /**
@@ -26,7 +27,16 @@ object StartupOutputClassifier {
                clean.contains("please log in", ignoreCase = true) ||
                clean.contains("you must be logged in", ignoreCase = true) ||
                clean.contains("unauthenticated", ignoreCase = true) ||
-               clean.contains("login to continue", ignoreCase = true)
+               clean.contains("login to continue", ignoreCase = true) ||
+               clean.contains("not signed in", ignoreCase = true) ||
+               clean.contains("not logged into", ignoreCase = true) ||
+               clean.contains("not logged in", ignoreCase = true) ||
+               clean.contains("sign in to continue", ignoreCase = true) ||
+               clean.contains("sign in with google", ignoreCase = true) ||
+               clean.contains("sign in to antigravity", ignoreCase = true) ||
+               clean.contains("error getting token source", ignoreCase = true) ||
+               clean.contains("no authentication methods available", ignoreCase = true) ||
+               clean.contains("remote-control-setting-enabled mendel flag is off", ignoreCase = true)
     }
 
     /**

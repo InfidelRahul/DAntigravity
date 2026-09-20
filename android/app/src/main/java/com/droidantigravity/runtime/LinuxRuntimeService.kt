@@ -114,6 +114,7 @@ class LinuxRuntimeService : Service() {
                     is AppState.StartingAntigravityServer -> state.status
                     is AppState.Ready -> "Active at ${state.url}"
                     is AppState.Stopping -> "Stopping Linux userspace..."
+                    is AppState.AuthenticationRequired -> "Authentication required"
                     is AppState.RootfsFailed -> "Rootfs error: ${state.message}"
                     is AppState.LinuxFailed -> "Linux error: ${state.message}"
                     is AppState.PackageInstallFailed -> "Package error: ${state.message}"

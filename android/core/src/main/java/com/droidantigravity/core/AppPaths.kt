@@ -41,6 +41,15 @@ class AppPaths(
     val antigravityLogFile: File get() = File(cacheDir, "antigravity.log")
     val runtimeLogFile: File get() = File(cacheDir, "linux-runtime.log")
 
+    val diagnosticsDir: File get() = File(filesDir, "diagnostics").apply { mkdirs() }
+    val diagnosticsLogsDir: File get() = File(diagnosticsDir, "logs").apply { mkdirs() }
+    val diagnosticLogFile: File get() = File(diagnosticsLogsDir, "app.log")
+    val diagnosticPreviousLogFile: File get() = File(diagnosticsLogsDir, "app.previous.log")
+    val stdoutLogFile: File get() = File(diagnosticsLogsDir, "stdout.log")
+    val stderrLogFile: File get() = File(diagnosticsLogsDir, "stderr.log")
+    val webviewLogFile: File get() = File(diagnosticsLogsDir, "webview.log")
+    val failureSnapshotDir: File get() = File(diagnosticsDir, "failure").apply { mkdirs() }
+
     /** Project-neutral guest bootstrap paths retained for rootfs compatibility. */
     val guestBootstrapScript: String = "/usr/local/lib/droidantigravity/bootstrap.sh"
     val hostBootstrapScript: File get() = File(rootfsDir, "usr/local/lib/droidantigravity/bootstrap.sh")

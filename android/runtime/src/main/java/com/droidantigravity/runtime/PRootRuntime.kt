@@ -3,6 +3,7 @@ package com.droidantigravity.runtime
 import android.content.Context
 import com.droidantigravity.core.AppPaths
 import com.droidantigravity.core.AvsLogger
+import com.droidantigravity.core.diagnostics.DiagnosticLogger
 import com.droidantigravity.core.Result
 import com.droidantigravity.core.RuntimeState
 import com.droidantigravity.core.runCatchingResult
@@ -201,12 +202,13 @@ open class PRootRuntime internal constructor(
     }
 
     override suspend fun start(): Result<Unit> = withContext(Dispatchers.IO) {
-        AvsLogger.i(TAG, "Starting Linux runtime supervisor")
+        val opId = DiagnosticLogger.createOperationId("PRUNTIME")
+        DiagnosticLogger.i(TAG, "runtime_start_requested", "Starting Linux runtime supervisor", operationId = opId)
 
         if (_state.value == RuntimeState.RUNNING && supervisorPid != null) {
             val check = NativeSpawn.waitFor(supervisorPid!!, true)
             if (check == -2) {
-                AvsLogger.d(TAG, "Runtime already active (PID $supervisorPid)")
+                DiagnosticLogger.d(TAG, "runtime_already_active", "Runtime already active (PID $supervisorPid)", operationId = opId)
                 return@withContext Result.Success(Unit)
             }
         }
@@ -215,24 +217,26 @@ open class PRootRuntime internal constructor(
 
         runCatchingResult {
             if (rootfsInstaller != null && !rootfsInstaller.isInstalled()) {
-                AvsLogger.i(TAG, "Rootfs not installed, installing now...")
+                DiagnosticLogger.i(TAG, "rootfs_installing", "Rootfs not installed, installing now...", operationId = opId)
                 install().getOrThrow()
             }
 
             // Verify binaries exist
-            getProotBinary()
-            getLoaderBinary()
+            val proot = getProotBinary()
+            val loader = getLoaderBinary()
+            DiagnosticLogger.d(TAG, "binaries_resolved", "PRoot binaries: proot=${proot.absolutePath}, loader=${loader.absolutePath}", operationId = opId)
 
             // Launch persistent background supervisor session
             val logFile = paths.runtimeLogFile
             val args = buildPRootArgs("while true; do sleep 3600; done", "/root")
             val env = buildEnvironment("/root")
 
-            val spawnResult = NativeSpawn.spawn(
+            val spawnResult = NativeSpawn.spawnInstrumented(
                 args.toTypedArray(),
                 env,
                 paths.rootfsDir.absolutePath,
-                logFile.absolutePath
+                logFile.absolutePath,
+                operationId = opId
             ) ?: throw RuntimeException("Failed to spawn PRoot supervisor process")
 
             supervisorPid = spawnResult[0]
@@ -242,7 +246,7 @@ open class PRootRuntime internal constructor(
             startTime = System.currentTimeMillis()
             _state.value = RuntimeState.RUNNING
 
-            AvsLogger.i(TAG, "Linux runtime running with supervisor PID $supervisorPid")
+            DiagnosticLogger.i(TAG, "runtime_supervisor_started", "Linux runtime running with supervisor PID $supervisorPid", operationId = opId, processId = supervisorPid)
         }
     }
 
@@ -323,6 +327,10 @@ open class PRootRuntime internal constructor(
     }
 
     override suspend fun execute(command: String): Result<String> = withContext(Dispatchers.IO) {
+        val opId = DiagnosticLogger.createOperationId("PROOT")
+        DiagnosticLogger.d(TAG, "exec_requested", "PRoot execute: cmd=[$command], rootfs=[${paths.rootfsDir.absolutePath}], cwd=[/home/user]", operationId = opId)
+        val startTime = System.currentTimeMillis()
+
         runCatchingResult {
             if (!isInstalled()) {
                 throw IllegalStateException("Cannot execute command: Rootfs is not installed")
@@ -333,25 +341,29 @@ open class PRootRuntime internal constructor(
             val env = buildEnvironment("/home/user")
 
             try {
-                val spawnResult = NativeSpawn.spawn(
+                val spawnResult = NativeSpawn.spawnInstrumented(
                     args.toTypedArray(),
                     env,
                     paths.rootfsDir.absolutePath,
-                    outputFile.absolutePath
+                    outputFile.absolutePath,
+                    operationId = opId
                 ) ?: throw RuntimeException("NativeSpawn failed to spawn process for command: $command")
 
                 val pid = spawnResult[0]
                 if (spawnResult.size > 1 && spawnResult[1] >= 0) {
-                    NativeSpawn.close(spawnResult[1])
+                    NativeSpawn.closeInstrumented(spawnResult[1], opId)
                 }
-                val exitCode = NativeSpawn.waitFor(pid, false)
+                val exitCode = NativeSpawn.waitForInstrumented(pid, false, opId)
+                val duration = System.currentTimeMillis() - startTime
 
                 val output = if (outputFile.exists()) outputFile.readText() else ""
 
                 if (exitCode != 0) {
+                    DiagnosticLogger.w(TAG, "exec_failed", "Command '$command' failed with exit code $exitCode in ${duration}ms", operationId = opId, processId = pid)
                     throw RuntimeException("Command '$command' failed with code $exitCode:\n$output")
                 }
 
+                DiagnosticLogger.d(TAG, "exec_success", "Command '$command' completed with code 0 in ${duration}ms", operationId = opId, processId = pid)
                 output
             } finally {
                 if (outputFile.exists()) {
@@ -371,6 +383,10 @@ open class PRootRuntime internal constructor(
         workingDir: String,
         onOutput: (String) -> Unit
     ): Result<Int> = withContext(Dispatchers.IO) {
+        val opId = DiagnosticLogger.createOperationId("PROOT_STREAM")
+        DiagnosticLogger.d(TAG, "stream_requested", "PRoot stream: cmd=[$command], rootfs=[${paths.rootfsDir.absolutePath}], cwd=[$workingDir]", operationId = opId)
+        val startTime = System.currentTimeMillis()
+
         runCatchingResult {
             if (!isInstalled()) {
                 throw IllegalStateException("Cannot execute command: Rootfs is not installed")
@@ -381,22 +397,22 @@ open class PRootRuntime internal constructor(
             val env = buildEnvironment(workingDir)
 
             try {
-                val spawnResult = NativeSpawn.spawn(
+                val spawnResult = NativeSpawn.spawnInstrumented(
                     args.toTypedArray(),
                     env,
                     paths.rootfsDir.absolutePath,
-                    outputFile.absolutePath
+                    outputFile.absolutePath,
+                    operationId = opId
                 ) ?: throw RuntimeException("NativeSpawn failed for streaming command: $command")
 
                 val pid = spawnResult[0]
                 if (spawnResult.size > 1 && spawnResult[1] >= 0) {
-                    NativeSpawn.close(spawnResult[1])
+                    NativeSpawn.closeInstrumented(spawnResult[1], opId)
                 }
                 var lastPos = 0L
 
-
                 while (true) {
-                    val status = NativeSpawn.waitFor(pid, true)
+                    val status = NativeSpawn.waitForInstrumented(pid, true, opId)
                     if (outputFile.exists() && outputFile.length() > lastPos) {
                         RandomAccessFile(outputFile, "r").use { raf ->
                             raf.seek(lastPos)
@@ -425,6 +441,8 @@ open class PRootRuntime internal constructor(
                                 }
                             }
                         }
+                        val duration = System.currentTimeMillis() - startTime
+                        DiagnosticLogger.d(TAG, "stream_completed", "Streaming command '$command' finished with code $status in ${duration}ms", operationId = opId, processId = pid)
                         return@runCatchingResult status
                     }
                     delay(50)

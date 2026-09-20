@@ -1,40 +1,47 @@
 package com.droidantigravity
 
-import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
-import android.view.Window
 import android.webkit.CookieManager
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Button
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
+import android.widget.EditText
+import java.io.File
+import com.droidantigravity.antigravity.AntigravityStartupException
 import com.droidantigravity.core.AppState
-import com.droidantigravity.core.AvsLogger
 import com.droidantigravity.core.Result
+import com.droidantigravity.core.diagnostics.DiagnosticLogger
+import com.droidantigravity.diagnostics.ExportLogManager
 import com.droidantigravity.web.AntigravityWebView
 import kotlinx.coroutines.launch
 
 /**
  * Thin Android shell. The actual Antigravity UI is supplied by Remote Control.
+ * Incorporates production diagnostic error display, log viewer, and export actions.
  */
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private const val TAG = "MainActivity"
+        private const val TAG = "UI.MainActivity"
     }
 
     private lateinit var runtimeController: RuntimeController
@@ -42,9 +49,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var root: FrameLayout
     private lateinit var webContainer: FrameLayout
     private lateinit var statusContainer: LinearLayout
+    private lateinit var statusTitle: TextView
     private lateinit var statusText: TextView
+    private lateinit var diagnosticIdText: TextView
     private lateinit var progress: ProgressBar
+    private lateinit var buttonRow: LinearLayout
+    private lateinit var tokenButton: Button
     private lateinit var retryButton: Button
+    private lateinit var viewLogsButton: Button
+    private lateinit var exportLogsButton: Button
+
+    @Volatile private var activeDiagnosticId: String? = null
 
     private val fileChooserLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -66,6 +81,8 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         window.statusBarColor = Color.BLACK
         window.navigationBarColor = Color.BLACK
+
+        DiagnosticLogger.i(TAG, "activity_created", "MainActivity onCreate")
 
         runtimeController = RuntimeController.getInstance(this)
         browser = AntigravityWebView(this)
@@ -99,29 +116,92 @@ class MainActivity : AppCompatActivity() {
 
         statusContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = android.view.Gravity.CENTER
+            gravity = Gravity.CENTER
             setPadding(48, 48, 48, 48)
             setBackgroundColor(Color.BLACK)
         }
 
         progress = ProgressBar(this)
-        statusText = TextView(this).apply {
+
+        statusTitle = TextView(this).apply {
             setTextColor(Color.WHITE)
-            textSize = 16f
-            gravity = android.view.Gravity.CENTER
-            setPadding(0, 32, 0, 0)
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(0, 24, 0, 12)
+            visibility = View.GONE
+        }
+
+        statusText = TextView(this).apply {
+            setTextColor(Color.LTGRAY)
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setPadding(0, 16, 0, 16)
             text = "Starting Linux environment…"
+        }
+
+        diagnosticIdText = TextView(this).apply {
+            setTextColor(Color.parseColor("#80DEEA"))
+            textSize = 13f
+            typeface = Typeface.MONOSPACE
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 24)
+            visibility = View.GONE
+        }
+
+        buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, 16, 0, 0)
+            visibility = View.GONE
+        }
+
+        tokenButton = Button(this).apply {
+            text = "Enter Token"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#7B1FA2"))
+            setOnClickListener { showTokenInputDialog() }
+            visibility = View.GONE
         }
 
         retryButton = Button(this).apply {
             text = "Retry"
-            visibility = View.GONE
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#1976D2"))
             setOnClickListener { startRuntime() }
         }
 
+        viewLogsButton = Button(this).apply {
+            text = "View Logs"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#37474F"))
+            setOnClickListener {
+                LogViewerDialog(this@MainActivity).show()
+            }
+        }
+
+        exportLogsButton = Button(this).apply {
+            text = "Export Logs"
+            setTextColor(Color.BLACK)
+            setBackgroundColor(Color.parseColor("#26A69A"))
+            setOnClickListener { exportDiagnosticBundle() }
+        }
+
+        val btnLp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(8, 0, 8, 0) }
+
+        buttonRow.addView(tokenButton, btnLp)
+        buttonRow.addView(retryButton, btnLp)
+        buttonRow.addView(viewLogsButton, btnLp)
+        buttonRow.addView(exportLogsButton, btnLp)
+
         statusContainer.addView(progress)
+        statusContainer.addView(statusTitle)
         statusContainer.addView(statusText)
-        statusContainer.addView(retryButton)
+        statusContainer.addView(diagnosticIdText)
+        statusContainer.addView(buttonRow)
 
         root.addView(webContainer)
         root.addView(
@@ -153,14 +233,11 @@ class MainActivity : AppCompatActivity() {
 
         browser.onConnectionError = { message ->
             runOnUiThread {
-                showStatus("Antigravity could not be loaded.\n$message", showProgress = false)
+                showError("Antigravity could not be loaded", message, activeDiagnosticId)
             }
         }
 
-        browser.onExternalUrlRequested = { url ->
-            // HTTPS navigation remains in the WebView. Non-web schemes are delegated.
-            false
-        }
+        browser.onExternalUrlRequested = { false }
 
         browser.onFileChooserRequested = { intent ->
             runOnUiThread {
@@ -189,15 +266,34 @@ class MainActivity : AppCompatActivity() {
                         showWebView(state.url)
                     }
 
-                    is AppState.RootfsFailed,
-                    is AppState.LinuxFailed,
-                    is AppState.PackageInstallFailed,
-                    is AppState.AntigravityFailed,
+                    is AppState.AuthenticationRequired -> {
+                        activeDiagnosticId = state.operationId
+                        showAuthenticationRequired(state.message, state.operationId)
+                    }
+
+                    is AppState.AntigravityFailed -> {
+                        activeDiagnosticId = state.operationId
+                        showError("Antigravity failed to start", state.message, state.operationId)
+                    }
+
+                    is AppState.LinuxFailed -> {
+                        activeDiagnosticId = state.operationId
+                        showError("Linux userspace error", state.message, state.operationId)
+                    }
+
+                    is AppState.RootfsFailed -> {
+                        activeDiagnosticId = state.operationId
+                        showError("Rootfs error", state.message, state.operationId)
+                    }
+
+                    is AppState.PackageInstallFailed -> {
+                        activeDiagnosticId = state.operationId
+                        showError("Package installation error", state.message, state.operationId)
+                    }
+
                     is AppState.Failed -> {
-                        showStatus(
-                            stateFailureMessage(state),
-                            showProgress = false
-                        )
+                        activeDiagnosticId = state.operationId
+                        showError("DroidAntigravity error", state.message, state.operationId)
                     }
 
                     else -> {
@@ -210,13 +306,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun startRuntime() {
         lifecycleScope.launch {
+            showStatus("Starting Antigravity…", showProgress = true)
             when (val result = runtimeController.startAll()) {
                 is Result.Success -> showWebView(result.data)
                 is Result.Failure -> {
-                    showStatus(
-                        result.error.message ?: "Unable to start DroidAntigravity",
-                        showProgress = false
-                    )
+                    val ex = result.error
+                    val opId = (ex as? AntigravityStartupException)?.operationId
+                    activeDiagnosticId = opId
+                    if ((ex as? AntigravityStartupException)?.error == com.droidantigravity.antigravity.AntigravityStartupError.AUTH_REQUIRED) {
+                        showAuthenticationRequired(
+                            message = ex.message ?: "Authentication required to use Antigravity",
+                            diagnosticId = opId
+                        )
+                    } else {
+                        showError(
+                            title = "Antigravity failed to start",
+                            message = ex.message ?: "Unable to start DroidAntigravity",
+                            diagnosticId = opId
+                        )
+                    }
                 }
             }
         }
@@ -225,19 +333,19 @@ class MainActivity : AppCompatActivity() {
     private fun showWebView(url: String) {
         runOnUiThread {
             if (!AntigravityWebView.isAntigravityRemoteControlUrl(url)) {
-                showStatus("Received an invalid Remote Control URL.", false)
+                showError("Invalid URL", "Received an invalid Remote Control URL.", activeDiagnosticId)
                 return@runOnUiThread
             }
 
             statusContainer.visibility = View.GONE
-            retryButton.visibility = View.GONE
+            buttonRow.visibility = View.GONE
             webContainer.visibility = View.VISIBLE
 
             try {
                 browser.loadRemoteControlUrl(url)
             } catch (e: Exception) {
-                AvsLogger.e(TAG, "Failed to load Remote Control URL", e)
-                showStatus("Unable to open Antigravity Remote Control.", false)
+                DiagnosticLogger.e(TAG, "webview_load_error", "Failed to load Remote Control URL: ${e.message}", e)
+                showError("Load Error", "Unable to open Antigravity Remote Control.", activeDiagnosticId)
             }
         }
     }
@@ -247,8 +355,123 @@ class MainActivity : AppCompatActivity() {
             webContainer.visibility = View.GONE
             statusContainer.visibility = View.VISIBLE
             progress.visibility = if (showProgress) View.VISIBLE else View.GONE
-            retryButton.visibility = if (showProgress) View.GONE else View.VISIBLE
+            statusTitle.visibility = View.GONE
+            diagnosticIdText.visibility = View.GONE
+            buttonRow.visibility = View.GONE
             statusText.text = message
+        }
+    }
+
+    private fun showAuthenticationRequired(message: String, diagnosticId: String?) {
+        runOnUiThread {
+            webContainer.visibility = View.GONE
+            statusContainer.visibility = View.VISIBLE
+            progress.visibility = View.GONE
+            statusTitle.text = "Google Sign In Required"
+            statusTitle.visibility = View.VISIBLE
+            statusText.text = "$message\n\nOfficial Antigravity Remote Control requires Google authentication to establish the reverse tunnel."
+            if (!diagnosticId.isNullOrBlank()) {
+                diagnosticIdText.text = "Diagnostic ID: $diagnosticId"
+                diagnosticIdText.visibility = View.VISIBLE
+            } else {
+                diagnosticIdText.visibility = View.GONE
+            }
+            buttonRow.visibility = View.VISIBLE
+            tokenButton.visibility = View.VISIBLE
+            retryButton.visibility = View.VISIBLE
+            viewLogsButton.visibility = View.VISIBLE
+            exportLogsButton.visibility = View.VISIBLE
+        }
+    }
+
+    private fun showTokenInputDialog() {
+        val input = EditText(this).apply {
+            hint = "Paste antigravity-oauth-token JSON content"
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            setBackgroundColor(Color.parseColor("#212121"))
+            setPadding(32, 32, 32, 32)
+            typeface = Typeface.MONOSPACE
+            textSize = 12f
+            minLines = 4
+        }
+
+        val container = FrameLayout(this).apply {
+            setPadding(48, 24, 48, 12)
+            addView(input)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Antigravity OAuth Token")
+            .setMessage("Paste your official Antigravity OAuth credentials JSON:")
+            .setView(container)
+            .setPositiveButton("Save & Connect") { _, _ ->
+                val tokenContent = input.text.toString().trim()
+                if (tokenContent.isNotEmpty()) {
+                    try {
+                        val tokenFile = File(runtimeController.paths.hostAntigravityDataDir, "antigravity-cli/antigravity-oauth-token")
+                        tokenFile.parentFile?.mkdirs()
+                        tokenFile.writeText(tokenContent)
+                        tokenFile.setReadable(true, true)
+                        tokenFile.setWritable(true, true)
+                        Toast.makeText(this, "Token saved successfully", Toast.LENGTH_SHORT).show()
+                        startRuntime()
+                    } catch (e: Exception) {
+                        DiagnosticLogger.e(TAG, "token_save_failed", "Failed to save token: ${e.message}", e)
+                        Toast.makeText(this, "Failed to save token: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showError(title: String, message: String, diagnosticId: String?) {
+        runOnUiThread {
+            webContainer.visibility = View.GONE
+            statusContainer.visibility = View.VISIBLE
+            progress.visibility = View.GONE
+            statusTitle.text = title
+            statusTitle.visibility = View.VISIBLE
+            statusText.text = message
+            if (!diagnosticId.isNullOrBlank()) {
+                diagnosticIdText.text = "Diagnostic ID: $diagnosticId"
+                diagnosticIdText.visibility = View.VISIBLE
+            } else {
+                diagnosticIdText.visibility = View.GONE
+            }
+            buttonRow.visibility = View.VISIBLE
+            tokenButton.visibility = View.GONE
+            retryButton.visibility = View.VISIBLE
+            viewLogsButton.visibility = View.VISIBLE
+            exportLogsButton.visibility = View.VISIBLE
+        }
+    }
+
+    private fun exportDiagnosticBundle() {
+        lifecycleScope.launch {
+            try {
+                Toast.makeText(this@MainActivity, "Preparing diagnostic bundle…", Toast.LENGTH_SHORT).show()
+                val zipFile = ExportLogManager.exportDiagnosticsZip(this@MainActivity, activeDiagnosticId)
+
+                val uri = FileProvider.getUriForFile(
+                    this@MainActivity,
+                    "${packageName}.fileprovider",
+                    zipFile
+                )
+
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/zip"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, "DroidAntigravity Diagnostics - ${zipFile.name}")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                startActivity(Intent.createChooser(shareIntent, "Export Diagnostic Bundle"))
+            } catch (e: Exception) {
+                DiagnosticLogger.e(TAG, "export_error", "Failed to export diagnostic bundle: ${e.message}", e)
+                Toast.makeText(this@MainActivity, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -268,21 +491,10 @@ class MainActivity : AppCompatActivity() {
         else -> "Starting DroidAntigravity…"
     }
 
-    private fun stateFailureMessage(state: AppState): String = when (state) {
-        is AppState.RootfsFailed -> state.message
-        is AppState.LinuxFailed -> state.message
-        is AppState.PackageInstallFailed -> state.message
-        is AppState.AntigravityFailed -> state.message
-        is AppState.Failed -> state.message
-        else -> "DroidAntigravity could not start."
-    }
-
     private fun setupBackHandling() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (browser.goBack()) return
-                // Keep the Linux/agy process alive; leaving the Activity does not
-                // implicitly destroy the persistent development environment.
                 finish()
             }
         })

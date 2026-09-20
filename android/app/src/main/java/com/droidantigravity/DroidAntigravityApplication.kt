@@ -5,30 +5,40 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
-import com.droidantigravity.core.AvsLogger
+import com.droidantigravity.core.AppPaths
+import com.droidantigravity.core.diagnostics.DiagnosticLogger
 
 /**
  * Main Application class for DroidAntigravity.
+ * Initializes the centralized diagnostic logging system, global error handler,
+ * and background notification channels.
  */
 class DroidAntigravityApplication : Application() {
 
     companion object {
-        private const val TAG = "DroidAntigravityApplication"
+        private const val TAG = "App"
         const val NOTIFICATION_CHANNEL_ID = "linux_runtime_channel"
-        
+
         @Volatile
         private lateinit var instance: DroidAntigravityApplication
-        
+
         fun getInstance(): DroidAntigravityApplication = instance
     }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
-        
-        AvsLogger.i(TAG, "DroidAntigravity application starting")
-        
-        // Create notification channel for foreground service
+
+        // 1. Initialize diagnostic logging system
+        val paths = AppPaths.getInstance(this)
+        DiagnosticLogger.init(paths.diagnosticsLogsDir)
+
+        // 2. Install global uncaught exception recorder
+        GlobalErrorRecorder.install(this)
+
+        DiagnosticLogger.i(TAG, "app_started", "DroidAntigravity application initialized")
+
+        // 3. Create notification channel for foreground service
         createNotificationChannel()
     }
 
@@ -42,11 +52,11 @@ class DroidAntigravityApplication : Application() {
                 description = "Keeps Linux runtime active in background"
                 setShowBadge(false)
             }
-            
+
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
-            
-            AvsLogger.d(TAG, "Notification channel created")
+
+            DiagnosticLogger.d(TAG, "notification_channel_created", "Notification channel created")
         }
     }
 }

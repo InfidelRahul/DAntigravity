@@ -19,6 +19,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.core.net.toUri
 import com.droidantigravity.core.AvsLogger
+import com.droidantigravity.core.diagnostics.DiagnosticLogger
+import com.droidantigravity.core.diagnostics.DiagnosticSanitizer
 
 /**
  * Minimal browser surface for the official Antigravity Remote Control web app.
@@ -95,13 +97,17 @@ class AntigravityWebView(private val context: Context) {
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
+            DiagnosticLogger.i(TAG, "WEBVIEW_CREATED", "Antigravity WebView instance created with secure settings")
+
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                    DiagnosticLogger.i(TAG, "WEBVIEW_LOAD_STARTED", "Loading Remote Control URL: ${DiagnosticSanitizer.redactRemoteControlUrl(url.orEmpty())}")
                     onLoadingStateChanged?.invoke(true)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     CookieManager.getInstance().flush()
+                    DiagnosticLogger.i(TAG, "WEBVIEW_LOAD_FINISHED", "Loaded Remote Control URL: ${DiagnosticSanitizer.redactRemoteControlUrl(url.orEmpty())}")
                     onLoadingStateChanged?.invoke(false)
                 }
 
@@ -110,11 +116,38 @@ class AntigravityWebView(private val context: Context) {
                     request: WebResourceRequest?,
                     error: WebResourceError?
                 ) {
-                    if (request?.isForMainFrame == true) {
-                        val message = error?.description?.toString() ?: "Web page failed to load"
-                        AvsLogger.w(TAG, "Main-frame WebView error: $message")
-                        onConnectionError?.invoke(message)
+                    val url = request?.url?.toString().orEmpty()
+                    val description = error?.description?.toString() ?: "Unknown web error"
+                    val isMainFrame = request?.isForMainFrame == true
+
+                    if (isMainFrame) {
+                        DiagnosticLogger.e(TAG, "WEBVIEW_LOAD_FAILED", "Main-frame error: $description on url: ${DiagnosticSanitizer.redactRemoteControlUrl(url)}")
+                        onConnectionError?.invoke(description)
+                    } else {
+                        DiagnosticLogger.w(TAG, "webview_subresource_error", "Subresource error: $description on url: ${DiagnosticSanitizer.redactRemoteControlUrl(url)}")
                     }
+                }
+
+                override fun onReceivedHttpError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    errorResponse: android.webkit.WebResourceResponse?
+                ) {
+                    val status = errorResponse?.statusCode ?: -1
+                    val reason = errorResponse?.reasonPhrase ?: "HTTP Error"
+                    val url = request?.url?.toString().orEmpty()
+                    DiagnosticLogger.w(TAG, "webview_http_error", "HTTP $status ($reason) on url: ${DiagnosticSanitizer.redactRemoteControlUrl(url)}")
+                }
+
+                override fun onReceivedSslError(
+                    view: WebView?,
+                    handler: android.webkit.SslErrorHandler?,
+                    error: android.net.http.SslError?
+                ) {
+                    val primaryError = error?.primaryError ?: -1
+                    val url = error?.url.orEmpty()
+                    DiagnosticLogger.e(TAG, "webview_ssl_error", "SSL error $primaryError on url: ${DiagnosticSanitizer.redactRemoteControlUrl(url)}")
+                    super.onReceivedSslError(view, handler, error)
                 }
 
                 override fun shouldOverrideUrlLoading(
@@ -122,6 +155,7 @@ class AntigravityWebView(private val context: Context) {
                     request: WebResourceRequest?
                 ): Boolean {
                     val uri = request?.url ?: return false
+                    DiagnosticLogger.d(TAG, "webview_navigation", "Navigation requested to: ${DiagnosticSanitizer.redact(uri.toString())}")
                     return handleNavigation(uri)
                 }
             }

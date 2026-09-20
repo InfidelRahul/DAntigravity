@@ -5,6 +5,8 @@ import com.droidantigravity.antigravity.AntigravityManager
 import com.droidantigravity.core.AppPaths
 import com.droidantigravity.core.AppState
 import com.droidantigravity.core.AvsLogger
+import com.droidantigravity.core.diagnostics.DiagnosticLogger
+import com.droidantigravity.diagnostics.ExportLogManager
 import com.droidantigravity.core.Result
 import com.droidantigravity.core.runCatchingResult
 import com.droidantigravity.rootfs.RootfsInstaller
@@ -82,6 +84,9 @@ class RuntimeController private constructor(private val context: Context) {
      */
     suspend fun startAll(forceRestart: Boolean = false): Result<String> = mutex.withLock {
         withContext(Dispatchers.IO) {
+            val opId = DiagnosticLogger.createOperationId("AGY")
+            DiagnosticLogger.i(TAG, "start_all_initiated", "Initiating complete local runtime startup", operationId = opId)
+
             if (!forceRestart) {
                 antigravityManager.currentRemoteControlUrl()?.let {
                     if (antigravityManager.state.isRunning) return@withContext Result.Success(it)
@@ -92,7 +97,7 @@ class RuntimeController private constructor(private val context: Context) {
                 try {
                     LinuxRuntimeService.start(context)
                 } catch (e: Exception) {
-                    AvsLogger.w(TAG, "Foreground service could not start: ${e.message}")
+                    DiagnosticLogger.w(TAG, "service_start_warning", "Foreground service could not start: ${e.message}", operationId = opId)
                 }
 
                 ensureRootfs()
@@ -104,17 +109,36 @@ class RuntimeController private constructor(private val context: Context) {
                 )
                 log("[Antigravity] Starting official agy with Remote Control.")
 
-                val url = antigravityManager.start().getOrThrow()
+                val url = antigravityManager.start(AntigravityManager.DEFAULT_STARTUP_TIMEOUT_MS, opId).getOrThrow()
                 _appState.value = AppState.Ready(url, "Antigravity")
                 log("[Antigravity] Remote Control is ready.")
                 url
             }.also { result ->
                 if (result.isFailure) {
                     val error = result.exceptionOrNull()!!
-                    _appState.value = AppState.AntigravityFailed(
-                        error.message ?: "Unable to start Antigravity",
-                        error
+                    val failureOpId = (error as? com.droidantigravity.antigravity.AntigravityStartupException)?.operationId ?: opId
+                    DiagnosticLogger.e(TAG, "start_all_failed", "Runtime startup failed: ${error.message}", error, operationId = failureOpId)
+
+                    ExportLogManager.createFailureSnapshot(
+                        context = context,
+                        operationId = failureOpId,
+                        error = error.message ?: "Runtime startup failed",
+                        details = error.stackTraceToString()
                     )
+
+                    val startupEx = error as? com.droidantigravity.antigravity.AntigravityStartupException
+                    if (startupEx?.error == com.droidantigravity.antigravity.AntigravityStartupError.AUTH_REQUIRED) {
+                        _appState.value = AppState.AuthenticationRequired(
+                            error.message ?: "Google authentication required to enable Antigravity Remote Control",
+                            operationId = failureOpId
+                        )
+                    } else {
+                        _appState.value = AppState.AntigravityFailed(
+                            error.message ?: "Unable to start Antigravity",
+                            error,
+                            operationId = failureOpId
+                        )
+                    }
                 }
             }
         }

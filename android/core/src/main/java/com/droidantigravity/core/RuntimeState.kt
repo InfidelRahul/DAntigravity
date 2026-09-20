@@ -91,19 +91,28 @@ sealed class AppState {
     data class StartingAntigravityServer(val status: String) : AppState()
     data class Ready(val url: String, val title: String = "DroidAntigravity") : AppState()
     object Stopping : AppState()
+    data class AuthenticationRequired(val message: String, val operationId: String? = null) : AppState()
 
     // Specific stage failures
-    data class RootfsFailed(val message: String, val throwable: Throwable? = null) : AppState()
-    data class LinuxFailed(val message: String, val throwable: Throwable? = null) : AppState()
-    data class PackageInstallFailed(val message: String, val throwable: Throwable? = null) : AppState()
-    data class AntigravityFailed(val message: String, val throwable: Throwable? = null) : AppState()
+    data class RootfsFailed(val message: String, val throwable: Throwable? = null, val operationId: String? = null) : AppState()
+    data class LinuxFailed(val message: String, val throwable: Throwable? = null, val operationId: String? = null) : AppState()
+    data class PackageInstallFailed(val message: String, val throwable: Throwable? = null, val operationId: String? = null) : AppState()
+    data class AntigravityFailed(val message: String, val throwable: Throwable? = null, val operationId: String? = null) : AppState()
 
     // General states
     object NotInstalled : AppState()
-    data class Failed(val message: String, val throwable: Throwable? = null) : AppState()
+    data class Failed(val message: String, val throwable: Throwable? = null, val operationId: String? = null) : AppState()
 
     val isReady: Boolean get() = this is Ready
     val isFailed: Boolean get() = this is Failed || this is RootfsFailed || this is LinuxFailed || this is PackageInstallFailed || this is AntigravityFailed
+    val failureOperationId: String? get() = when (this) {
+        is RootfsFailed -> operationId
+        is LinuxFailed -> operationId
+        is PackageInstallFailed -> operationId
+        is AntigravityFailed -> operationId
+        is Failed -> operationId
+        else -> null
+    }
     val canAccessCli: Boolean get() = this is LinuxReady || this is InstallingPackages || this is InstallingAntigravity || this is AntigravityReady || this is StartingAntigravityServer || this is Ready || this is AntigravityFailed
 }
 

@@ -93,9 +93,17 @@ class AntigravityManagerTest {
     fun test6_startupClassifierDetectsAuthenticationRequired() {
         val text1 = "Error: Not authenticated. Run 'agy auth login' to sign in."
         val text2 = "Authentication required: please log in with Google to continue."
+        val text3 = "Welcome to the Antigravity CLI. You are currently not signed in."
+        val text4 = "error getting token source: You are not logged into Antigravity."
+        val text5 = "Sign in to Antigravity"
+        val text6 = "[RemoteControl] Staying disconnected: remote-control-setting-enabled Mendel flag is off"
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text1))
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text2))
-        assertEquals(AntigravityStartupError.AUTHENTICATION_REQUIRED, StartupOutputClassifier.classifyError(text1, 1))
+        assertTrue(StartupOutputClassifier.isAuthenticationRequired(text3))
+        assertTrue(StartupOutputClassifier.isAuthenticationRequired(text4))
+        assertTrue(StartupOutputClassifier.isAuthenticationRequired(text5))
+        assertTrue(StartupOutputClassifier.isAuthenticationRequired(text6))
+        assertEquals(AntigravityStartupError.AUTHENTICATION_REQUIRED, StartupOutputClassifier.classifyError(text3, 1))
     }
 
     @Test
@@ -291,6 +299,68 @@ class AntigravityManagerTest {
         assertTrue(result.isSuccess)
         assertEquals("https://antigravity.google.com/r/trusted-session-456", result.getOrNull())
         assertEquals(AntigravityState.RUNNING, manager.state)
+    }
+
+    @Test
+    fun test19_ensureOnboardingCompletedCreatesFile() {
+        manager.ensureOnboardingCompleted()
+        val onboardingFile = File(testPaths.hostAntigravityDataDir, "antigravity-cli/cache/onboarding.json")
+        assertTrue(onboardingFile.exists())
+        val text = onboardingFile.readText()
+        assertTrue(text.contains("\"consumerOnboardingComplete\": true"))
+        assertTrue(text.contains("\"onboardingComplete\": true"))
+    }
+
+    @Test
+    fun test20_ensureWorkspaceTrustedCreatesSettingsJson() {
+        manager.ensureWorkspaceTrusted()
+        val settingsFile = File(testPaths.hostAntigravityDataDir, "antigravity-cli/settings.json")
+        assertTrue(settingsFile.exists())
+        val text = settingsFile.readText()
+        assertTrue(text.contains("\"trustedWorkspaces\""))
+        assertTrue(text.contains(testPaths.guestHomePath))
+        assertTrue(text.contains(testPaths.guestProjectsPath))
+    }
+
+    @Test
+    fun test21_unauthenticatedCliFailsFastWithoutTimeout() = runBlocking {
+        spawner.waitForExitCode = -2 // Process is still running (e.g. paused at login prompt)
+        spawner.onSpawn = { logPath ->
+            File(logPath).writeText("Welcome to the Antigravity CLI. You are currently not signed in.\n")
+        }
+
+        val startTime = System.currentTimeMillis()
+        val result = manager.start(startupTimeoutMs = 10_000)
+        val elapsed = System.currentTimeMillis() - startTime
+
+        assertTrue(result.isFailure)
+        val ex = result.exceptionOrNull()
+        assertTrue(ex is AntigravityStartupException)
+        assertEquals(AntigravityStartupError.AUTHENTICATION_REQUIRED, (ex as AntigravityStartupException).error)
+        assertEquals(AntigravityState.AUTHENTICATION_REQUIRED, manager.state)
+        // Must fail fast within 1 second, NOT wait out the 10-second timeout!
+        assertTrue("Startup should have failed fast but took ${elapsed}ms", elapsed < 2000)
+    }
+
+    @Test
+    fun test22_officialMultilineOutputWithV2UrlParsedSuccessfully() {
+        val officialOutput = """
+             Ga=q,f=32,s=1,v=1,i=31;AAAAAA==
+            > /remote-control
+              ⎿  Remote control on for this session.
+             Hostname: localhost-mighty-shard
+             Open
+             https://antigravity.google.com/r/e61732b3-ef5d-4dfc-87b9-dfe262a4ef67-v2 on
+             another device to take over.
+
+            ────────────────────────────────────────────────────────────────────────────────
+            >
+            ────────────────────────────────────────────────────────────────────────────────
+        """.trimIndent()
+
+        val parsedUrl = RemoteControlUrlParser.parseUrl(officialOutput)
+        assertNotNull(parsedUrl)
+        assertEquals("https://antigravity.google.com/r/e61732b3-ef5d-4dfc-87b9-dfe262a4ef67-v2", parsedUrl)
     }
 }
 
