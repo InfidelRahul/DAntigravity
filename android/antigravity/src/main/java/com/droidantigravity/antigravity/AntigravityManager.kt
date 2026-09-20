@@ -39,6 +39,7 @@ class AntigravityManager internal constructor(
         spawner: ProcessSpawner,
         paths: AppPaths
     ) : this(null, linuxRuntime, spawner, paths)
+
     companion object {
         private const val TAG = "AntigravityManager"
         const val DEFAULT_STARTUP_TIMEOUT_MS = 60_000L
@@ -65,7 +66,8 @@ class AntigravityManager internal constructor(
 
         if (paths.hostAntigravityBin.exists() ||
             File(paths.rootfsDir, "usr/local/bin/agy").exists() ||
-            File(paths.rootfsDir, "usr/bin/agy").exists()
+            File(paths.rootfsDir, "usr/bin/agy").exists() ||
+            File(paths.rootfsDir, "bin/agy").exists()
         ) {
             return true
         }
@@ -148,6 +150,38 @@ class AntigravityManager internal constructor(
     }
 
     /**
+     * Pre-populates trusted workspaces in ~/.gemini/antigravity-cli/settings.json
+     * so the official CLI never blocks indefinitely on the interactive trust prompt.
+     */
+    internal fun ensureWorkspaceTrusted() {
+        try {
+            val cliDataDir = File(paths.hostAntigravityDataDir, "antigravity-cli")
+            cliDataDir.mkdirs()
+            val settingsFile = File(cliDataDir, "settings.json")
+            val defaultWorkspaces = listOf(paths.guestHomePath, paths.guestProjectsPath)
+
+            val currentWorkspaces = if (settingsFile.exists()) {
+                val text = settingsFile.readText()
+                val match = Regex(""""trustedWorkspaces"\s*:\s*\[(.*?)\]""", RegexOption.DOT_MATCHES_ALL).find(text)
+                val existing = match?.groupValues?.get(1)
+                    ?.split(",")
+                    ?.map { it.trim().trim('"', '\'', ' ', '\t', '\r', '\n') }
+                    ?.filter { it.isNotEmpty() } ?: emptyList()
+                (existing + defaultWorkspaces).distinct()
+            } else {
+                defaultWorkspaces
+            }
+
+            val jsonArray = currentWorkspaces.joinToString(",\n    ") { "\"$it\"" }
+            val json = "{\n  \"trustedWorkspaces\": [\n    $jsonArray\n  ]\n}\n"
+            settingsFile.writeText(json)
+            AvsLogger.d(TAG, "Configured trusted workspaces in settings.json")
+        } catch (e: Exception) {
+            AvsLogger.w(TAG, "Failed to pre-configure trusted workspaces: ${e.message}")
+        }
+    }
+
+    /**
      * Starts one interactive CLI session with Remote Control enabled.
      *
      * The URL is session-scoped and must never be treated as persistent project
@@ -167,7 +201,7 @@ class AntigravityManager internal constructor(
             val installResult = install()
             if (installResult.isFailure) {
                 val ex = AntigravityStartupException(
-                    AntigravityStartupError.CLI_NOT_INSTALLED,
+                    AntigravityStartupError.NOT_INSTALLED,
                     "Antigravity CLI is not installed and auto-installation failed: ${installResult.exceptionOrNull()?.message}",
                     cause = installResult.exceptionOrNull()
                 )
@@ -179,6 +213,9 @@ class AntigravityManager internal constructor(
 
         _state.set(AntigravityState.STARTING)
         remoteControlUrl = null
+
+        // Ensure workspace is pre-trusted so agy doesn't block waiting for confirmation
+        ensureWorkspaceTrusted()
 
         val log = paths.antigravityLogFile
         log.parentFile?.mkdirs()
@@ -205,7 +242,7 @@ class AntigravityManager internal constructor(
                 cols = 80,
                 rows = 24
             ) ?: throw AntigravityStartupException(
-                AntigravityStartupError.CLI_START_FAILED,
+                AntigravityStartupError.START_FAILED,
                 "Unable to spawn agy process using PTY"
             )
 
@@ -225,7 +262,7 @@ class AntigravityManager internal constructor(
             Result.Success(url)
         } catch (e: AntigravityStartupException) {
             AvsLogger.e(TAG, "Antigravity startup failed: [${e.error}] ${e.message}")
-            if (e.error == AntigravityStartupError.AUTHENTICATION_REQUIRED) {
+            if (e.error == AntigravityStartupError.AUTH_REQUIRED) {
                 _state.set(AntigravityState.AUTHENTICATION_REQUIRED)
             } else {
                 _state.set(AntigravityState.FAILED)
@@ -278,7 +315,7 @@ class AntigravityManager internal constructor(
                 return url
             }
 
-            // 2. Check for interactive workspace trust prompt
+            // 2. Check for interactive workspace trust prompt fallback
             if (!trustConfirmed && StartupOutputClassifier.isTrustPrompt(text)) {
                 stdinFd?.let { fd ->
                     AvsLogger.i(TAG, "Workspace trust prompt detected. Sending confirmation to PTY.")
@@ -290,7 +327,7 @@ class AntigravityManager internal constructor(
             // 3. Early detection of fatal conditions
             if (StartupOutputClassifier.isAuthenticationRequired(text)) {
                 throw AntigravityStartupException(
-                    AntigravityStartupError.AUTHENTICATION_REQUIRED,
+                    AntigravityStartupError.AUTH_REQUIRED,
                     "Antigravity requires authentication before starting Remote Control",
                     details = AntigravityLogRedactor.redact(text)
                 )
@@ -304,11 +341,19 @@ class AntigravityManager internal constructor(
                 )
             }
 
+            if (StartupOutputClassifier.isNetworkError(text)) {
+                throw AntigravityStartupException(
+                    AntigravityStartupError.NETWORK_ERROR,
+                    "Antigravity Remote Control encountered a network connection error",
+                    details = AntigravityLogRedactor.redact(text)
+                )
+            }
+
             // 4. Check if process has terminated
             val pid = processPid
             if (pid == null) {
                 throw AntigravityStartupException(
-                    AntigravityStartupError.CLI_START_FAILED,
+                    AntigravityStartupError.START_FAILED,
                     "CLI process PID is null during startup"
                 )
             }
@@ -331,6 +376,7 @@ class AntigravityManager internal constructor(
                 throw AntigravityStartupException(
                     error,
                     "Antigravity CLI exited with status $status before publishing Remote Control URL: ${error.description}",
+                    exitCode = status,
                     details = sanitizedDetails
                 )
             }

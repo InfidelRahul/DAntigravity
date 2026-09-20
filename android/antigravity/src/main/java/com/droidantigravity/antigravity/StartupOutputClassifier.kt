@@ -44,13 +44,28 @@ object StartupOutputClassifier {
     }
 
     /**
+     * Checks if the output indicates a network error during startup.
+     */
+    fun isNetworkError(text: String): Boolean {
+        val clean = RemoteControlUrlParser.stripAnsi(text)
+        return clean.contains("no route to host", ignoreCase = true) ||
+               clean.contains("network is unreachable", ignoreCase = true) ||
+               clean.contains("could not resolve host", ignoreCase = true) ||
+               clean.contains("dial tcp", ignoreCase = true) ||
+               clean.contains("connection refused", ignoreCase = true) ||
+               clean.contains("failed to connect to jetski", ignoreCase = true) ||
+               clean.contains("failed to connect to", ignoreCase = true) ||
+               clean.contains("certificate verify failed", ignoreCase = true) ||
+               clean.contains("TLS handshake error", ignoreCase = true)
+    }
+
+    /**
      * Checks if the output indicates a failure while establishing the remote control session.
      */
     fun isRemoteControlStartFailed(text: String): Boolean {
         val clean = RemoteControlUrlParser.stripAnsi(text)
         return clean.contains("failed to start remote control", ignoreCase = true) ||
                clean.contains("could not establish reverse tunnel", ignoreCase = true) ||
-               clean.contains("failed to connect to jetski", ignoreCase = true) ||
                clean.contains("error opening TTY", ignoreCase = true) ||
                clean.contains("could not open TTY", ignoreCase = true)
     }
@@ -60,11 +75,12 @@ object StartupOutputClassifier {
      */
     fun classifyError(text: String, exitCode: Int? = null): AntigravityStartupError {
         return when {
-            isAuthenticationRequired(text) -> AntigravityStartupError.AUTHENTICATION_REQUIRED
+            isAuthenticationRequired(text) -> AntigravityStartupError.AUTH_REQUIRED
             isRemoteControlUnavailable(text) -> AntigravityStartupError.REMOTE_CONTROL_UNAVAILABLE
-            isRemoteControlStartFailed(text) -> AntigravityStartupError.REMOTE_CONTROL_START_FAILED
-            exitCode != null && exitCode != -2 -> AntigravityStartupError.CLI_EXITED_BEFORE_REMOTE_CONTROL
-            else -> AntigravityStartupError.REMOTE_CONTROL_URL_NOT_DETECTED
+            isNetworkError(text) -> AntigravityStartupError.NETWORK_ERROR
+            isRemoteControlStartFailed(text) -> AntigravityStartupError.FAILED
+            exitCode != null && exitCode != -2 -> AntigravityStartupError.PROCESS_EXITED
+            else -> AntigravityStartupError.URL_NOT_DETECTED
         }
     }
 }

@@ -4,14 +4,28 @@ package com.droidantigravity.antigravity
  * Actionable error classifications for Antigravity Remote Control startup.
  */
 enum class AntigravityStartupError(val description: String) {
-    CLI_NOT_INSTALLED("Antigravity CLI is not installed or not found on PATH"),
-    CLI_START_FAILED("Failed to spawn Antigravity CLI process"),
-    CLI_EXITED_BEFORE_REMOTE_CONTROL("Antigravity CLI exited before publishing Remote Control URL"),
-    AUTHENTICATION_REQUIRED("Antigravity CLI requires user authentication"),
+    NOT_INSTALLED("Antigravity CLI is not installed or not found on PATH"),
+    STARTING("Antigravity CLI is starting"),
+    START_FAILED("Failed to spawn Antigravity CLI process"),
+    PROCESS_EXITED("Antigravity CLI process exited before Remote Control URL was published"),
+    AUTH_REQUIRED("Antigravity CLI requires user authentication"),
     REMOTE_CONTROL_UNAVAILABLE("Remote Control feature is not available or disabled"),
-    REMOTE_CONTROL_START_FAILED("Antigravity CLI failed to establish Remote Control session"),
-    REMOTE_CONTROL_URL_NOT_DETECTED("No valid Remote Control URL detected in CLI output"),
-    STARTUP_TIMEOUT("Timed out waiting for Antigravity Remote Control URL");
+    NETWORK_ERROR("Network connection error encountered during Remote Control startup"),
+    STARTUP_TIMEOUT("Timed out waiting for Antigravity Remote Control URL"),
+    URL_NOT_DETECTED("No valid Remote Control URL detected in CLI output"),
+    FAILED("Antigravity Remote Control failed to start"),
+    RUNNING("Antigravity Remote Control is running"),
+    STOPPED("Antigravity Remote Control is stopped");
+
+    companion object {
+        // Backwards-compatible aliases
+        val CLI_NOT_INSTALLED = NOT_INSTALLED
+        val CLI_START_FAILED = START_FAILED
+        val CLI_EXITED_BEFORE_REMOTE_CONTROL = PROCESS_EXITED
+        val AUTHENTICATION_REQUIRED = AUTH_REQUIRED
+        val REMOTE_CONTROL_START_FAILED = FAILED
+        val REMOTE_CONTROL_URL_NOT_DETECTED = URL_NOT_DETECTED
+    }
 }
 
 /**
@@ -21,9 +35,13 @@ class AntigravityStartupException(
     val error: AntigravityStartupError,
     message: String = error.description,
     val details: String? = null,
+    val exitCode: Int? = null,
+    val stdout: String? = null,
+    val stderr: String? = null,
+    val reason: String? = null,
     cause: Throwable? = null
 ) : IllegalStateException(message, cause) {
     override fun toString(): String {
-        return "AntigravityStartupException(error=$error, message=$message, details=${details?.take(200)})"
+        return "AntigravityStartupException(error=$error, exitCode=$exitCode, message=$message, reason=$reason, details=${details?.take(200)})"
     }
 }
