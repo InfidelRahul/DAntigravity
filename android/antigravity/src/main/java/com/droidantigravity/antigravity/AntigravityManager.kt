@@ -50,13 +50,23 @@ class AntigravityManager(
 
     val state: AntigravityState get() = _state.get()
 
-    fun isInstalled(): Boolean = runCatching {
-        val result = kotlinx.coroutines.runBlocking {
-            linuxRuntime.execute("command -v agy 2>/dev/null || true")
+    fun isInstalled(): Boolean {
+        val installed = try {
+            val result = kotlinx.coroutines.runBlocking {
+                linuxRuntime.execute("command -v agy 2>/dev/null || true")
+            }
+    
+            result.getOrNull()?.trim()?.isNotEmpty() == true
+        } catch (e: Exception) {
+            AvsLogger.e(TAG, "Failed to check Antigravity installation: ${e.message}")
+            false
         }
-        result.getOrNull()?.trim()?.isNotEmpty() == true
-    }.also {
-        if (!it && state != AntigravityState.RUNNING) _state.set(AntigravityState.NOT_INSTALLED)
+    
+        if (!installed && state != AntigravityState.RUNNING) {
+            _state.set(AntigravityState.NOT_INSTALLED)
+        }
+    
+        return installed
     }
 
     suspend fun version(): Result<String> = withContext(Dispatchers.IO) {
