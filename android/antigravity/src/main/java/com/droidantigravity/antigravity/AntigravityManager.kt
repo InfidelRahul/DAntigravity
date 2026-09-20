@@ -222,7 +222,7 @@ class AntigravityManager(
     }
 
     private suspend fun monitorProcess(pid: Int, log: File) {
-        while (currentCoroutineContext().isActive) {
+        while (currentCoroutineContext()[Job]?.isActive == true) {
             val status = NativeSpawn.waitFor(pid, true)
             if (status != -2) {
                 if (processPid == pid) {
