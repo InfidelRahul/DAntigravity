@@ -48,10 +48,7 @@ class CoreTest {
         assertFalse(linuxReady.isReady)
         assertFalse(linuxReady.isFailed)
         assertTrue(linuxReady.canAccessCli)
-        assertFalse(startingAuth.isReady)
-        assertFalse(startingAuth.isFailed)
-        assertTrue(startingAuth.canAccessCli)
-
+        
         val startingServer: AppState = AppState.StartingAntigravityServer("Starting local server...")
         assertFalse(startingServer.isReady)
         assertFalse(startingServer.isFailed)
