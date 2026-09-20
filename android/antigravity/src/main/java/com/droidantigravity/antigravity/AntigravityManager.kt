@@ -11,8 +11,8 @@ import com.droidantigravity.runtime.PRootRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -222,7 +222,7 @@ class AntigravityManager(
     }
 
     private suspend fun monitorProcess(pid: Int, log: File) {
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             val status = NativeSpawn.waitFor(pid, true)
             if (status != -2) {
                 if (processPid == pid) {
@@ -230,7 +230,13 @@ class AntigravityManager(
                     stdinFd?.let { NativeSpawn.close(it) }
                     stdinFd = null
                     remoteControlUrl = null
-                    _state.set(if (isInstalled()) AntigravityState.STOPPED else AntigravityState.NOT_INSTALLED)
+                    _state.set(
+                        if (isInstalled()) {
+                            AntigravityState.STOPPED
+                        } else {
+                            AntigravityState.NOT_INSTALLED
+                        }
+                    )
                     AvsLogger.i(TAG, "agy exited with status $status")
                 }
                 return
