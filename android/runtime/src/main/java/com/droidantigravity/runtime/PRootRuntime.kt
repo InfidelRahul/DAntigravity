@@ -24,16 +24,19 @@ import java.io.RandomAccessFile
  * - Guest environment does not inherit Android LD_LIBRARY_PATH.
  * - Executes commands inside guest as `/bin/bash -lc '<command>'`.
  */
-class PRootRuntime(
-    private val context: Context,
-    private val rootfsInstaller: RootfsInstaller
+open class PRootRuntime internal constructor(
+    private val context: Context?,
+    private val rootfsInstaller: RootfsInstaller?,
+    explicitPaths: AppPaths? = null
 ) : LinuxRuntime {
+    constructor(context: Context, rootfsInstaller: RootfsInstaller) : this(context, rootfsInstaller, null)
+    constructor(paths: AppPaths) : this(null, null, paths)
 
     companion object {
         private const val TAG = "PRootRuntime"
     }
 
-    private val paths = AppPaths.getInstance(context)
+    private val paths = explicitPaths ?: context?.let { AppPaths.getInstance(it) } ?: AppPaths()
     private val _state = MutableStateFlow(RuntimeState.NOT_INSTALLED)
     override val state: StateFlow<RuntimeState> = _state.asStateFlow()
 
@@ -50,7 +53,7 @@ class PRootRuntime(
     }
 
     private fun updateState() {
-        if (!rootfsInstaller.isInstalled()) {
+        if (rootfsInstaller != null && !rootfsInstaller.isInstalled()) {
             _state.value = RuntimeState.NOT_INSTALLED
         } else if (_state.value == RuntimeState.NOT_INSTALLED) {
             _state.value = RuntimeState.READY
@@ -58,7 +61,7 @@ class PRootRuntime(
     }
 
     override fun isInstalled(): Boolean {
-        return rootfsInstaller.isInstalled()
+        return rootfsInstaller?.isInstalled() ?: true
     }
 
     /**
@@ -134,7 +137,7 @@ class PRootRuntime(
      * Builds standard PRoot CLI invocation arguments.
      * Enforces that guest operates exclusively against the Ubuntu rootfs.
      */
-    fun buildPRootArgs(guestCommand: String, workingDir: String = "/home/user"): List<String> {
+    open fun buildPRootArgs(guestCommand: String, workingDir: String = "/home/user"): List<String> {
         val proot = getProotBinary()
         val rootfsPath = paths.rootfsDir.absolutePath
 
@@ -165,7 +168,7 @@ class PRootRuntime(
      * Note: LD_LIBRARY_PATH is deliberately omitted from the guest environment
      * to prevent glibc executables from loading incompatible Android Bionic libraries.
      */
-    fun buildEnvironment(homeDir: String = "/home/user", extraEnv: Map<String, String> = emptyMap()): Array<String> {
+    open fun buildEnvironment(homeDir: String = "/home/user", extraEnv: Map<String, String> = emptyMap()): Array<String> {
         val loader = getLoaderBinary()
         val baseEnv = mutableListOf(
             "PROOT_LOADER=${loader.absolutePath}",
@@ -188,7 +191,7 @@ class PRootRuntime(
         AvsLogger.i(TAG, "Initiating rootfs install from PRootRuntime")
         _state.value = RuntimeState.INSTALLING
 
-        val result = rootfsInstaller.install()
+        val result = rootfsInstaller?.install() ?: Result.Success(Unit)
         if (result.isSuccess) {
             _state.value = RuntimeState.READY
         } else {
@@ -211,7 +214,7 @@ class PRootRuntime(
         _state.value = RuntimeState.STARTING
 
         runCatchingResult {
-            if (!rootfsInstaller.isInstalled()) {
+            if (rootfsInstaller != null && !rootfsInstaller.isInstalled()) {
                 AvsLogger.i(TAG, "Rootfs not installed, installing now...")
                 install().getOrThrow()
             }

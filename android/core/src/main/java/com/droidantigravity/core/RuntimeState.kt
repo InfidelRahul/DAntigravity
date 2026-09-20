@@ -66,6 +66,7 @@ enum class AntigravityState {
     STOPPED,
     STARTING,
     RUNNING,
+    AUTHENTICATION_REQUIRED,
     FAILED;
 
     val isRunning: Boolean get() = this == RUNNING

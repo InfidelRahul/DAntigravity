@@ -36,6 +36,45 @@ object NativeSpawn {
     ): IntArray?
 
     /**
+     * Spawns an interactive process inside a dedicated Pseudo-Terminal (PTY).
+     * Connects stdin/stdout/stderr and controlling terminal to the slave PTY,
+     * while pumping master PTY output into outputPath and allowing input writes.
+     *
+     * @param argv Command arguments array
+     * @param envp Environment variables array
+     * @param cwd Initial working directory
+     * @param outputPath Path to file where terminal output is recorded
+     * @param cols Terminal window width in columns (default: 80)
+     * @param rows Terminal window height in rows (default: 24)
+     * @return IntArray of [pid, masterPtyFd] or null on failure
+     */
+    external fun spawnPty(
+        argv: Array<String>,
+        envp: Array<String>,
+        cwd: String,
+        outputPath: String,
+        cols: Int = 80,
+        rows: Int = 24
+    ): IntArray?
+
+    /**
+     * Writes data bytes to a native file descriptor (e.g. master PTY fd or pipe fd).
+     *
+     * @param fd File descriptor to write to
+     * @param data Bytes to write
+     * @return Number of bytes written, or negative error code
+     */
+    external fun write(fd: Int, data: ByteArray): Int
+
+    /**
+     * Convenience method to write a UTF-8 string to a file descriptor.
+     */
+    fun writeString(fd: Int, str: String): Boolean {
+        val bytes = str.toByteArray(Charsets.UTF_8)
+        return write(fd, bytes) == bytes.size
+    }
+
+    /**
      * Waits for a process to change state.
      *
      * @param pid Process ID

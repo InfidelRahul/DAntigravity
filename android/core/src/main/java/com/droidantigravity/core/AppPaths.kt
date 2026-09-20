@@ -9,16 +9,23 @@ import java.io.File
  * Antigravity application data remains inside the persistent Linux HOME.
  * Android only owns the Linux rootfs, runtime cache and logs.
  */
-class AppPaths(private val context: Context) {
-    val filesDir: File get() = context.filesDir
-    val cacheDir: File get() = context.cacheDir
+class AppPaths(
+    private val context: Context? = null,
+    private val explicitFilesDir: File? = null,
+    private val explicitCacheDir: File? = null,
+    private val explicitNativeLibDir: File? = null
+) {
+    constructor(context: Context) : this(context, null, null, null)
+
+    val filesDir: File get() = explicitFilesDir ?: context?.filesDir ?: File("/tmp/droidantigravity/files")
+    val cacheDir: File get() = explicitCacheDir ?: context?.cacheDir ?: File("/tmp/droidantigravity/cache")
 
     val rootfsDir: File get() = File(filesDir, "ubuntu-rootfs")
     val rootfsStagingDir: File get() = File(filesDir, "ubuntu-rootfs-staging")
     val rootfsInstallMarker: File get() = File(rootfsDir, ".installed")
 
     val prootTmpDir: File get() = File(cacheDir, "proot-tmp").apply { mkdirs() }
-    val nativeLibDir: File get() = File(context.applicationInfo.nativeLibraryDir)
+    val nativeLibDir: File get() = explicitNativeLibDir ?: File(context?.applicationInfo?.nativeLibraryDir ?: "${filesDir.path}/lib")
     val nativeBinDir: File get() = File(filesDir, "native-bin").apply { mkdirs() }
 
     val guestHomePath: String = "/home/user"
@@ -49,5 +56,15 @@ class AppPaths(private val context: Context) {
             instance ?: synchronized(this) {
                 instance ?: AppPaths(context.applicationContext).also { instance = it }
             }
+
+        fun forTesting(filesDir: File, cacheDir: File): AppPaths {
+            val testPaths = AppPaths(null, filesDir, cacheDir, File(filesDir, "lib"))
+            instance = testPaths
+            return testPaths
+        }
+
+        fun resetForTesting() {
+            instance = null
+        }
     }
 }

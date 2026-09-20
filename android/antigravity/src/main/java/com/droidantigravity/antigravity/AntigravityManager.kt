@@ -6,13 +6,14 @@ import com.droidantigravity.core.AppPaths
 import com.droidantigravity.core.AvsLogger
 import com.droidantigravity.core.Result
 import com.droidantigravity.core.runCatchingResult
-import com.droidantigravity.runtime.NativeSpawn
 import com.droidantigravity.runtime.PRootRuntime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -25,20 +26,24 @@ import java.util.concurrent.atomic.AtomicReference
  * CLI establishes the Remote Control reverse tunnel and prints the URL that
  * the Android WebView consumes.
  */
-class AntigravityManager(
-    private val context: Context,
-    private val linuxRuntime: PRootRuntime
+class AntigravityManager internal constructor(
+    private val context: Context?,
+    private val linuxRuntime: PRootRuntime,
+    private val spawner: ProcessSpawner = NativeProcessSpawner(),
+    private val paths: AppPaths = context?.let { AppPaths.getInstance(it) } ?: AppPaths()
 ) {
+    constructor(context: Context, linuxRuntime: PRootRuntime) : this(context, linuxRuntime, NativeProcessSpawner())
+
+    constructor(
+        linuxRuntime: PRootRuntime,
+        spawner: ProcessSpawner,
+        paths: AppPaths
+    ) : this(null, linuxRuntime, spawner, paths)
     companion object {
         private const val TAG = "AntigravityManager"
-        private const val REMOTE_CONTROL_HOST = "antigravity.google.com"
-        private val REMOTE_URL = Regex(
-            """https://antigravity\.google\.com/r/[^\s<>"']+""",
-            RegexOption.IGNORE_CASE
-        )
+        const val DEFAULT_STARTUP_TIMEOUT_MS = 60_000L
     }
 
-    private val paths = AppPaths.getInstance(context)
     private val scope = CoroutineScope(Dispatchers.IO)
     private val _state = AtomicReference(AntigravityState.UNKNOWN)
 
@@ -52,7 +57,7 @@ class AntigravityManager(
 
     fun isInstalled(): Boolean {
         if (!paths.rootfsInstallMarker.exists()) {
-            if (state != AntigravityState.RUNNING) {
+            if (state != AntigravityState.RUNNING && state != AntigravityState.AUTHENTICATION_REQUIRED) {
                 _state.set(AntigravityState.NOT_INSTALLED)
             }
             return false
@@ -69,17 +74,17 @@ class AntigravityManager(
             val result = kotlinx.coroutines.runBlocking {
                 linuxRuntime.execute("command -v agy 2>/dev/null || true")
             }
-    
+
             result.getOrNull()?.trim()?.isNotEmpty() == true
         } catch (e: Exception) {
             AvsLogger.e(TAG, "Failed to check Antigravity installation: ${e.message}")
             false
         }
-    
-        if (!installed && state != AntigravityState.RUNNING) {
+
+        if (!installed && state != AntigravityState.RUNNING && state != AntigravityState.AUTHENTICATION_REQUIRED) {
             _state.set(AntigravityState.NOT_INSTALLED)
         }
-    
+
         return installed
     }
 
@@ -115,7 +120,7 @@ class AntigravityManager(
             """.trimIndent()
 
             val result = linuxRuntime.executeStreaming(command) { output ->
-                AvsLogger.d(TAG, redact(output))
+                AvsLogger.d(TAG, AntigravityLogRedactor.redact(output))
             }.getOrThrow()
 
             if (result != 0) {
@@ -134,7 +139,9 @@ class AntigravityManager(
 
     suspend fun ensureInstalled(): Result<Unit> {
         if (isInstalled()) {
-            _state.set(AntigravityState.STOPPED)
+            if (_state.get() == AntigravityState.UNKNOWN || _state.get() == AntigravityState.NOT_INSTALLED) {
+                _state.set(AntigravityState.STOPPED)
+            }
             return Result.Success(Unit)
         }
         return install()
@@ -146,13 +153,29 @@ class AntigravityManager(
      * The URL is session-scoped and must never be treated as persistent project
      * or conversation identity.
      */
-    suspend fun start(): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun start(): Result<String> = start(DEFAULT_STARTUP_TIMEOUT_MS)
+
+    suspend fun start(startupTimeoutMs: Long): Result<String> = withContext(Dispatchers.IO) {
         if (state == AntigravityState.RUNNING && processPid != null && remoteControlUrl != null) {
-            return@withContext Result.Success(remoteControlUrl!!)
+            val check = spawner.waitFor(processPid!!, true)
+            if (check == -2) {
+                return@withContext Result.Success(remoteControlUrl!!)
+            }
         }
 
-        ensureInstalled().getOrThrow()
-        stopInternal()
+        if (!isInstalled()) {
+            val installResult = install()
+            if (installResult.isFailure) {
+                val ex = AntigravityStartupException(
+                    AntigravityStartupError.CLI_NOT_INSTALLED,
+                    "Antigravity CLI is not installed and auto-installation failed: ${installResult.exceptionOrNull()?.message}",
+                    cause = installResult.exceptionOrNull()
+                )
+                _state.set(AntigravityState.FAILED)
+                return@withContext Result.Failure(ex, ex.message)
+            }
+        }
+        stopInternal(preserveState = false)
 
         _state.set(AntigravityState.STARTING)
         remoteControlUrl = null
@@ -167,36 +190,58 @@ class AntigravityManager(
             paths.guestHomePath,
             mapOf(
                 "PATH" to "/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                "AGY_CLI_HIDE_LOGO" to "1"
+                "AGY_CLI_HIDE_LOGO" to "1",
+                "TERM" to "xterm-256color",
+                "COLORTERM" to "truecolor"
             )
         )
 
-        runCatchingResult {
-            val spawned = NativeSpawn.spawn(
+        try {
+            val spawned = spawner.spawnPty(
                 args.toTypedArray(),
                 env,
                 paths.rootfsDir.absolutePath,
-                log.absolutePath
-            ) ?: error("Unable to spawn agy")
+                log.absolutePath,
+                cols = 80,
+                rows = 24
+            ) ?: throw AntigravityStartupException(
+                AntigravityStartupError.CLI_START_FAILED,
+                "Unable to spawn agy process using PTY"
+            )
 
-            processPid = spawned[0]
+            val pid = spawned[0]
+            processPid = pid
             stdinFd = spawned.getOrNull(1)?.takeIf { it >= 0 }
+
+            val url = awaitRemoteControlUrl(log, startupTimeoutMs)
+
             _state.set(AntigravityState.RUNNING)
 
             monitorJob?.cancel()
             monitorJob = scope.launch {
-                monitorProcess(spawned[0], log)
+                monitorProcess(pid, log)
             }
 
-            awaitRemoteControlUrl(log)
-                ?: throw IllegalStateException(
-                    "agy started but did not publish an Antigravity Remote Control URL"
-                )
-        }.also { result ->
-            if (result.isFailure) {
+            Result.Success(url)
+        } catch (e: AntigravityStartupException) {
+            AvsLogger.e(TAG, "Antigravity startup failed: [${e.error}] ${e.message}")
+            if (e.error == AntigravityStartupError.AUTHENTICATION_REQUIRED) {
+                _state.set(AntigravityState.AUTHENTICATION_REQUIRED)
+            } else {
                 _state.set(AntigravityState.FAILED)
-                stopInternal()
             }
+            stopInternal(preserveState = true)
+            Result.Failure(e, e.message)
+        } catch (e: CancellationException) {
+            AvsLogger.i(TAG, "Antigravity startup was cancelled")
+            _state.set(if (isInstalled()) AntigravityState.STOPPED else AntigravityState.NOT_INSTALLED)
+            stopInternal(preserveState = true)
+            throw e
+        } catch (e: Throwable) {
+            AvsLogger.e(TAG, "Antigravity startup error: ${e.message}", e)
+            _state.set(AntigravityState.FAILED)
+            stopInternal(preserveState = true)
+            Result.Failure(e, e.message)
         }
     }
 
@@ -205,43 +250,118 @@ class AntigravityManager(
     fun processId(): Int? = processPid
 
     fun stop() {
-        stopInternal()
+        stopInternal(preserveState = false)
     }
 
-    private suspend fun awaitRemoteControlUrl(log: File): String? {
-        val deadline = System.currentTimeMillis() + 60_000
-        var lastLength = 0L
+    internal suspend fun awaitRemoteControlUrl(log: File, timeoutMs: Long = DEFAULT_STARTUP_TIMEOUT_MS): String {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var trustConfirmed = false
 
         while (System.currentTimeMillis() < deadline) {
-            if (!log.exists()) return null
+            currentCoroutineContext().ensureActive()
 
-            val text = log.readText()
-            val match = REMOTE_URL.find(text)
-            if (match != null && match.value.contains(REMOTE_CONTROL_HOST)) {
-                val url = match.value.trimEnd('.', ',', ';', ')', ']', '}', '"', '\'')
+            val text = if (log.exists()) {
+                try {
+                    log.readText()
+                } catch (e: Exception) {
+                    ""
+                }
+            } else {
+                ""
+            }
+
+            // 1. Check for valid Remote Control URL
+            val url = RemoteControlUrlParser.parseUrl(text)
+            if (url != null) {
                 remoteControlUrl = url
-                AvsLogger.i(TAG, "Remote Control URL received")
+                AvsLogger.i(TAG, "Remote Control URL received: ${AntigravityLogRedactor.redact(url)}")
                 return url
             }
 
-            if (log.length() < lastLength) lastLength = 0
-            lastLength = log.length()
+            // 2. Check for interactive workspace trust prompt
+            if (!trustConfirmed && StartupOutputClassifier.isTrustPrompt(text)) {
+                stdinFd?.let { fd ->
+                    AvsLogger.i(TAG, "Workspace trust prompt detected. Sending confirmation to PTY.")
+                    spawner.writeString(fd, "\r\n")
+                    trustConfirmed = true
+                }
+            }
 
+            // 3. Early detection of fatal conditions
+            if (StartupOutputClassifier.isAuthenticationRequired(text)) {
+                throw AntigravityStartupException(
+                    AntigravityStartupError.AUTHENTICATION_REQUIRED,
+                    "Antigravity requires authentication before starting Remote Control",
+                    details = AntigravityLogRedactor.redact(text)
+                )
+            }
+
+            if (StartupOutputClassifier.isRemoteControlUnavailable(text)) {
+                throw AntigravityStartupException(
+                    AntigravityStartupError.REMOTE_CONTROL_UNAVAILABLE,
+                    "Antigravity Remote Control feature is unavailable or unsupported",
+                    details = AntigravityLogRedactor.redact(text)
+                )
+            }
+
+            // 4. Check if process has terminated
             val pid = processPid
-            if (pid == null || NativeSpawn.waitFor(pid, true) != -2) return null
+            if (pid == null) {
+                throw AntigravityStartupException(
+                    AntigravityStartupError.CLI_START_FAILED,
+                    "CLI process PID is null during startup"
+                )
+            }
+
+            val status = spawner.waitFor(pid, true)
+            if (status != -2) {
+                val finalText = if (log.exists()) {
+                    try {
+                        log.readText()
+                    } catch (e: Exception) {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+
+                val error = StartupOutputClassifier.classifyError(finalText, status)
+                val sanitizedDetails = AntigravityLogRedactor.redact(finalText)
+
+                throw AntigravityStartupException(
+                    error,
+                    "Antigravity CLI exited with status $status before publishing Remote Control URL: ${error.description}",
+                    details = sanitizedDetails
+                )
+            }
+
             delay(100)
         }
 
-        return null
+        val timeoutText = if (log.exists()) {
+            try {
+                AntigravityLogRedactor.redact(log.readText())
+            } catch (e: Exception) {
+                ""
+            }
+        } else {
+            ""
+        }
+
+        throw AntigravityStartupException(
+            AntigravityStartupError.STARTUP_TIMEOUT,
+            "Timed out after ${timeoutMs}ms waiting for Antigravity Remote Control URL",
+            details = timeoutText
+        )
     }
 
-    private suspend fun monitorProcess(pid: Int, log: File) {
+    internal suspend fun monitorProcess(pid: Int, log: File) {
         while (currentCoroutineContext()[Job]?.isActive == true) {
-            val status = NativeSpawn.waitFor(pid, true)
+            val status = spawner.waitFor(pid, true)
             if (status != -2) {
                 if (processPid == pid) {
                     processPid = null
-                    stdinFd?.let { NativeSpawn.close(it) }
+                    stdinFd?.let { spawner.close(it) }
                     stdinFd = null
                     remoteControlUrl = null
                     _state.set(
@@ -259,30 +379,31 @@ class AntigravityManager(
         }
     }
 
-    private fun stopInternal() {
+    internal fun stopInternal(preserveState: Boolean = false) {
         monitorJob?.cancel()
         monitorJob = null
 
         val pid = processPid
         if (pid != null) {
-            NativeSpawn.kill(pid, 15)
-            Thread.sleep(250)
-            NativeSpawn.kill(pid, 9)
-            NativeSpawn.waitFor(pid, true)
+            spawner.kill(pid, 15) // SIGTERM
+            try {
+                Thread.sleep(100)
+            } catch (ignored: InterruptedException) {
+            }
+            spawner.kill(pid, 9)  // SIGKILL
+            spawner.waitFor(pid, true)
         }
 
-        stdinFd?.let { NativeSpawn.close(it) }
+        stdinFd?.let { spawner.close(it) }
         stdinFd = null
         processPid = null
         remoteControlUrl = null
 
-        if (isInstalled()) _state.set(AntigravityState.STOPPED)
-        else _state.set(AntigravityState.NOT_INSTALLED)
+        if (!preserveState) {
+            if (isInstalled()) _state.set(AntigravityState.STOPPED)
+            else _state.set(AntigravityState.NOT_INSTALLED)
+        }
     }
 
-    private fun redact(text: String): String {
-        return text
-            .replace(Regex("""https://antigravity\.google\.com/r/\S+"""), "<remote-control-url>")
-            .replace(Regex("""(?i)(token|api[_-]?key|authorization|cookie)=?\S+"""), "$1=<redacted>")
-    }
+    private fun redact(text: String): String = AntigravityLogRedactor.redact(text)
 }
