@@ -93,17 +93,26 @@ class AntigravityManagerTest {
     fun test6_startupClassifierDetectsAuthenticationRequired() {
         val text1 = "Error: Not authenticated. Run 'agy auth login' to sign in."
         val text2 = "Authentication required: please log in with Google to continue."
-        val text3 = "Welcome to the Antigravity CLI. You are currently not signed in."
+        val text3 = "Authentication failed: invalid session"
         val text4 = "error getting token source: You are not logged into Antigravity."
-        val text5 = "Sign in to Antigravity"
-        val text6 = "[RemoteControl] Staying disconnected: remote-control-setting-enabled Mendel flag is off"
+        val text5 = "Error: unauthenticated request"
+        val text6 = "Fatal: no authentication methods available"
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text1))
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text2))
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text3))
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text4))
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text5))
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text6))
-        assertEquals(AntigravityStartupError.AUTHENTICATION_REQUIRED, StartupOutputClassifier.classifyError(text3, 1))
+
+        // Verify informational sign-in prompts are NOT classified as fatal auth errors
+        val infoPrompt1 = "Welcome to the Antigravity CLI. You are currently not signed in."
+        val infoPrompt2 = "Sign in to Antigravity"
+        val infoPrompt3 = "[RemoteControl] Staying disconnected: remote-control-setting-enabled Mendel flag is off"
+        assertFalse(StartupOutputClassifier.isAuthenticationRequired(infoPrompt1))
+        assertFalse(StartupOutputClassifier.isAuthenticationRequired(infoPrompt2))
+        assertFalse(StartupOutputClassifier.isAuthenticationRequired(infoPrompt3))
+
+        assertEquals(AntigravityStartupError.AUTHENTICATION_REQUIRED, StartupOutputClassifier.classifyError(text1, 1))
     }
 
     @Test
@@ -145,7 +154,7 @@ class AntigravityManagerTest {
     fun test10_authenticationRequiredClassifiesErrorAndState() = runBlocking {
         spawner.waitForExitCode = 1
         spawner.onSpawn = { logPath ->
-            File(logPath).writeText("Please log in to continue. Run 'agy auth login'\n")
+            File(logPath).writeText("Error: Not authenticated. Please run 'agy auth login'\n")
         }
 
         val result = manager.start(startupTimeoutMs = 1000)
@@ -313,27 +322,45 @@ class AntigravityManagerTest {
     }
 
     @Test
-    fun test21_unauthenticatedCliFailsFastWithoutTimeout() = runBlocking {
-        spawner.waitForExitCode = -2 // Process is still running (e.g. paused at login prompt)
+    fun test21_unauthenticatedRunningCliDoesNotAbortEarly() = runBlocking {
+        spawner.waitForExitCode = -2 // Process is still running (e.g. in browser auth flow)
         spawner.onSpawn = { logPath ->
-            File(logPath).writeText("Welcome to the Antigravity CLI. You are currently not signed in.\n")
+            File(logPath).writeText("Authentication required: please log in with Google to continue.\n")
         }
 
         val startTime = System.currentTimeMillis()
-        val result = manager.start(startupTimeoutMs = 10_000)
+        val result = manager.start(startupTimeoutMs = 400)
         val elapsed = System.currentTimeMillis() - startTime
 
+        // Should not abort early; should wait out timeout or until URL is received
         assertTrue(result.isFailure)
         val ex = result.exceptionOrNull()
         assertTrue(ex is AntigravityStartupException)
-        assertEquals(AntigravityStartupError.AUTHENTICATION_REQUIRED, (ex as AntigravityStartupException).error)
-        assertEquals(AntigravityState.AUTHENTICATION_REQUIRED, manager.state)
-        // Must fail fast within 1 second, NOT wait out the 10-second timeout!
-        assertTrue("Startup should have failed fast but took ${elapsed}ms", elapsed < 2000)
+        assertEquals(AntigravityStartupError.STARTUP_TIMEOUT, (ex as AntigravityStartupException).error)
+        assertEquals(AntigravityState.FAILED, manager.state)
+        assertTrue("Startup should wait for timeout rather than aborting early, took ${elapsed}ms", elapsed >= 300)
     }
 
     @Test
-    fun test22_officialMultilineOutputWithV2UrlParsedSuccessfully() {
+    fun test22_officialAuthFlowProducesUrlSuccessfully() = runBlocking {
+        spawner.waitForExitCode = -2
+        val job = async {
+            manager.start(startupTimeoutMs = 2000)
+        }
+
+        delay(50)
+        testPaths.antigravityLogFile.writeText("Authentication required: please sign in with Google to continue.\n")
+        delay(100)
+        testPaths.antigravityLogFile.appendText("Open https://antigravity.google.com/r/authenticated-session-789 on another device.\n")
+
+        val result = job.await()
+        assertTrue(result.isSuccess)
+        assertEquals("https://antigravity.google.com/r/authenticated-session-789", result.getOrNull())
+        assertEquals(AntigravityState.RUNNING, manager.state)
+    }
+
+    @Test
+    fun test23_officialMultilineOutputWithV2UrlParsedSuccessfully() {
         val officialOutput = """
              Ga=q,f=32,s=1,v=1,i=31;AAAAAA==
             > /remote-control
