@@ -30,9 +30,9 @@ android {
         if (releaseKeystore?.exists() == true) {
             create("release") {
                 storeFile = releaseKeystore
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: error("KEYSTORE_PASSWORD is required for release signing")
-                keyAlias = System.getenv("KEY_ALIAS") ?: error("KEY_ALIAS is required for release signing")
-                keyPassword = System.getenv("KEY_PASSWORD") ?: error("KEY_PASSWORD is required for release signing")
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "droidantigravity123"
+                keyAlias = System.getenv("KEY_ALIAS") ?: "droidantigravity"
+                keyPassword = System.getenv("KEY_PASSWORD") ?: "droidantigravity123"
             }
         }
     }
