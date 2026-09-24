@@ -99,6 +99,19 @@ class AntigravityManager internal constructor(
         linuxRuntime.execute("agy --version")
     }
 
+    suspend fun capabilities(): Result<AntigravityCapabilities> = withContext(Dispatchers.IO) {
+        runCatchingResult {
+            val cliVersion = version().getOrThrow().trim()
+            val help = linuxRuntime.execute("agy remote-control --help 2>&1 || true").getOrDefault("")
+            AntigravityCapabilities(
+                version = cliVersion,
+                interactiveRemoteControl = true,
+                remoteControlDaemon = help.contains("remote-control", ignoreCase = true) &&
+                    help.contains("start", ignoreCase = true)
+            )
+        }
+    }
+
     /**
      * Installs the official Linux CLI using Google's published installer.
      */
@@ -160,42 +173,6 @@ class AntigravityManager internal constructor(
             return Result.Success(Unit)
         }
         return install(opId)
-    }
-
-    /**
-     * Pre-populates trusted workspaces in ~/.gemini/antigravity-cli/settings.json
-     * so the official CLI never blocks indefinitely on the interactive trust prompt.
-     */
-    internal fun ensureWorkspaceTrusted(operationId: String? = null) {
-        try {
-            val cliDataDir = File(paths.hostAntigravityDataDir, "antigravity-cli")
-            cliDataDir.mkdirs()
-            val settingsFile = File(cliDataDir, "settings.json")
-            val defaultWorkspaces = listOf(
-                paths.guestHomePath,
-                paths.guestProjectsPath,
-                "/workspace/bold-ramanujan"
-            )
-
-            val currentWorkspaces = if (settingsFile.exists()) {
-                val text = settingsFile.readText()
-                val match = Regex(""""trustedWorkspaces"\s*:\s*\[(.*?)\]""", RegexOption.DOT_MATCHES_ALL).find(text)
-                val existing = match?.groupValues?.get(1)
-                    ?.split(",")
-                    ?.map { it.trim().trim('"', '\'', ' ', '\t', '\r', '\n') }
-                    ?.filter { it.isNotEmpty() } ?: emptyList()
-                (existing + defaultWorkspaces).distinct()
-            } else {
-                defaultWorkspaces
-            }
-
-            val jsonArray = currentWorkspaces.joinToString(",\n    ") { "\"$it\"" }
-            val json = "{\n  \"trustedWorkspaces\": [\n    $jsonArray\n  ]\n}\n"
-            settingsFile.writeText(json)
-            DiagnosticLogger.d(TAG, "workspace_trust_configured", "Pre-configured trusted workspaces in settings.json: $currentWorkspaces", operationId = operationId)
-        } catch (e: Exception) {
-            DiagnosticLogger.w(TAG, "workspace_trust_failed", "Failed to pre-configure trusted workspaces: ${e.message}", operationId = operationId)
-        }
     }
 
     /**
@@ -271,7 +248,13 @@ class AntigravityManager internal constructor(
 
         // 4. CLI environment diagnostics
         val agyBin = if (paths.hostAntigravityBin.exists()) paths.guestAntigravityBin else "agy"
-        val guestCommand = "exec $agyBin --remote-control"
+        // Keep D-Bus + Secret Service in the same session as agy. This avoids
+        // the common headless-keyring failure where agy inherits no session bus.
+        // The official headless daemon is intentionally not forced here because
+        // it requires a Linux systemd user service, which a PRoot userspace does
+        // not provide. The documented interactive --remote-control mode is the
+        // reliable fallback and remains tied to this supervised CLI process.
+        val guestCommand = "exec dbus-run-session -- sh -lc 'eval \"\$(gnome-keyring-daemon --start --components=secrets)\"; exec $agyBin --remote-control'"
         val guestCwd = paths.guestHomePath
         val guestPath = "/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 

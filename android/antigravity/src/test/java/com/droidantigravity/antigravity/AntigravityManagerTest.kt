@@ -311,17 +311,6 @@ class AntigravityManagerTest {
     }
 
     @Test
-    fun test20_ensureWorkspaceTrustedCreatesSettingsJson() {
-        manager.ensureWorkspaceTrusted()
-        val settingsFile = File(testPaths.hostAntigravityDataDir, "antigravity-cli/settings.json")
-        assertTrue(settingsFile.exists())
-        val text = settingsFile.readText()
-        assertTrue(text.contains("\"trustedWorkspaces\""))
-        assertTrue(text.contains(testPaths.guestHomePath))
-        assertTrue(text.contains(testPaths.guestProjectsPath))
-    }
-
-    @Test
     fun test21_unauthenticatedRunningCliDoesNotAbortEarly() = runBlocking {
         spawner.waitForExitCode = -2 // Process is still running (e.g. in browser auth flow)
         spawner.onSpawn = { logPath ->

@@ -138,6 +138,45 @@ open class PRootRuntime internal constructor(
      * Builds standard PRoot CLI invocation arguments.
      * Enforces that guest operates exclusively against the Ubuntu rootfs.
      */
+    /**
+     * Builds a PRoot invocation that starts the active Linux user's configured
+     * shell directly on a PTY. No shell is selected by the Android UI.
+     */
+    open fun buildInteractiveShellArgs(workingDir: String = "/home/user"): List<String> {
+        val proot = getProotBinary()
+        val rootfsPath = paths.rootfsDir.absolutePath
+        val shellSelector = "shell=\$(awk -F: '\$1==\"user\"{print \$7; exit}' /etc/passwd); " +
+            "[ -x \"\$shell\" ] || shell=/bin/sh; exec \"\$shell\""
+
+        return mutableListOf(
+            proot.absolutePath,
+            "--link2symlink",
+            "-0",
+            "-r", rootfsPath,
+            "-b", "/dev",
+            "-b", "/proc",
+            "-b", "/sys",
+            "-w", workingDir,
+            "/bin/sh",
+            "-c", shellSelector
+        )
+    }
+
+    /**
+     * Starts the default Linux shell on a caller-owned interactive PTY.
+     */
+    fun spawnInteractiveShell(cols: Int = 80, rows: Int = 24): IntArray? {
+        check(isInstalled()) { "Linux rootfs is not installed" }
+        check(_state.value == RuntimeState.RUNNING) { "Linux runtime is not running" }
+        return NativeSpawn.spawnPtyInteractive(
+            buildInteractiveShellArgs().toTypedArray(),
+            buildEnvironment("/home/user"),
+            paths.rootfsDir.absolutePath,
+            cols,
+            rows
+        )
+    }
+
     open fun buildPRootArgs(guestCommand: String, workingDir: String = "/home/user"): List<String> {
         val proot = getProotBinary()
         val rootfsPath = paths.rootfsDir.absolutePath
@@ -178,7 +217,6 @@ open class PRootRuntime internal constructor(
             "GLIBC_TUNABLES=glibc.pthread.rseq=0",
             "HOME=$homeDir",
             "USER=user",
-            "SHELL=/bin/bash",
             "PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "TERM=xterm-256color",
             "LANG=C.UTF-8",

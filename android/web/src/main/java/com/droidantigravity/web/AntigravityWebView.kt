@@ -44,6 +44,15 @@ class AntigravityWebView(private val context: Context) {
                     uri.path.orEmpty().startsWith("/r/")
             }.getOrDefault(false)
 
+        fun isSupportedEndpointUrl(url: String): Boolean =
+            runCatching {
+                val uri = url.toUri()
+                uri.scheme.equals("https", true) ||
+                    (uri.scheme.equals("http", true) &&
+                        (uri.host.equals("127.0.0.1", true) ||
+                            uri.host.equals("localhost", true)))
+            }.getOrDefault(false)
+
         private fun isHttpUrl(uri: Uri): Boolean =
             uri.scheme.equals("https", true) ||
                 (uri.scheme.equals("http", true) &&
@@ -227,12 +236,21 @@ class AntigravityWebView(private val context: Context) {
         }
     }
 
-    fun loadRemoteControlUrl(url: String) {
-        require(isAntigravityRemoteControlUrl(url)) {
-            "Only an official Antigravity Remote Control URL may be loaded"
+    fun loadEndpoint(endpoint: AntigravityEndpoint) {
+        require(isSupportedEndpointUrl(endpoint.url)) {
+            "Unsupported Antigravity endpoint URL"
+        }
+        if (endpoint.source == EndpointSource.REMOTE_CONTROL) {
+            require(isAntigravityRemoteControlUrl(endpoint.url)) {
+                "Invalid official Antigravity Remote Control URL"
+            }
         }
         val view = webView ?: createWebView()
-        view.loadUrl(url)
+        view.loadUrl(endpoint.url)
+    }
+
+    fun loadRemoteControlUrl(url: String) {
+        loadEndpoint(AntigravityEndpoint(url, EndpointSource.REMOTE_CONTROL))
     }
 
     fun reload() {

@@ -2,191 +2,173 @@
 
 DroidAntigravity is a thin Android host for the official Google Antigravity CLI.
 
-The project does **not** reimplement Antigravity authentication, conversations, agent execution, Remote Control UI, credentials, or session storage. The official `agy` CLI owns those capabilities. DroidAntigravity provides the Linux userspace in which `agy` runs, keeps that process alive with an Android foreground service, and exposes the official Remote Control URL through Android WebView or an external browser.
-
-## Architecture
+## Core boundary
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                    DroidAntigravity                         │
-│                                                             │
-│  Android UI                                                 │
-│  ├── MainActivity                                           │
-│  ├── Android permissions / storage                          │
-│  ├── WebView                                                 │
-│  └── Browser/share actions                                  │
-│                                                             │
-│  Android lifecycle                                          │
-│  └── LinuxRuntimeService (foreground service)               │
-│                                                             │
-│  RuntimeController                                          │
-│  ├── RootfsInstaller                                        │
-│  ├── PRootRuntime                                           │
-│  └── AntigravityManager                                     │
-│                                                             │
-│  Linux / PRoot                                               │
-│  └── Ubuntu ARM64 userspace                                  │
-│       └── official `agy` CLI                                │
-│             ├── Google authentication  ← owned by agy       │
-│             ├── credentials/session       ← owned by agy     │
-│             ├── conversations/agents     ← owned by agy      │
-│             └── Remote Control            ← owned by agy     │
-│                         │                                   │
-│                         │ official URL                       │
-│                         ▼                                   │
-│                https://antigravity.google.com/r/...         │
-│                         │                                   │
-│              ┌──────────┴──────────┐                        │
-│              ▼                     ▼                        │
-│        Android WebView       External browser               │
-└─────────────────────────────────────────────────────────────┘
+Android UI
+   │
+   ├── Official Antigravity WebView
+   │
+   └── Real Linux Terminal UI
+          │
+          ▼
+        PTY
+          │
+          ▼
+Ubuntu ARM64 / PRoot
+   │
+   ├── user's configured default shell
+   ├── D-Bus session
+   ├── Secret Service / GNOME Keyring
+   └── official agy CLI
+          │
+          └── official Remote Control reverse tunnel
 ```
 
-## Responsibilities
+Android provides presentation, lifecycle and transport. Linux owns execution. `agy` owns Antigravity.
 
-### DroidAntigravity owns
+## Real terminal architecture
 
-- Android application lifecycle.
-- Persistent ARM64 Linux/PRoot runtime.
-- Rootfs installation and validation.
-- Installation of the official `agy` CLI.
-- Starting, monitoring, and explicitly stopping the `agy` process.
-- PTY/stdout/stderr capture required to observe CLI state.
-- Detecting and validating the official Remote Control URL.
-- Loading that URL in Android WebView.
-- Copying, sharing, or opening the URL in another Android browser.
-- Android notifications, foreground-service lifecycle, file chooser and download integration.
-- Diagnostics for Android/Linux/PRoot/process/WebView failures.
-
-### Antigravity CLI owns
-
-- Google authentication.
-- Credential persistence and secure credential storage.
-- `/logout`.
-- Conversations and conversation history.
-- Agent execution.
-- Antigravity projects and settings.
-- Agent permissions.
-- Remote Control tunnel/session.
-- Remote Control web application.
-
-DroidAntigravity must not copy, inject, delete, or otherwise manage Antigravity authentication credentials.
-
-## Startup flow
+The terminal must never execute commands one-by-one from Android.
 
 ```text
-User starts DroidAntigravity
-        │
-        ▼
-Start foreground runtime service
-        │
-        ▼
-Ensure rootfs
-        │
-        ▼
-Start PRoot Linux userspace
-        │
-        ▼
-Install official agy if missing
-        │
-        ▼
-Start official agy with Remote Control
-        │
-        ├── existing official session → continue
-        │
-        └── authentication required → official agy auth flow
-                                      (no app token UI)
-        │
-        ▼
-Capture official Remote Control URL
-        │
-        ├── Android WebView
-        └── Copy / Share / Open in browser
+Keyboard / IME / paste
+          │
+          ▼
+   Terminal emulator
+          │
+          ▼
+     serialized PTY input
+          │
+          ▼
+ Linux user's configured shell
 ```
 
-## Lifecycle
+The shell owns:
 
-Interactive Remote Control is tied to the lifetime of the `agy` process. Therefore the Android foreground service is responsible for keeping the Linux userspace and CLI process alive while the app is backgrounded.
+- current working directory
+- history
+- prompt
+- environment
+- aliases/functions
+- shell parsing
+- pipes/redirection
+- job control
+- interactive programs
 
-The Activity/WebView is a presentation layer. Destroying or recreating the Activity must not intentionally stop the Linux runtime.
+The Android side owns only:
 
-The user-facing Stop action explicitly stops:
+- PTY transport
+- VT/xterm terminal emulation
+- rendering
+- touch selection/scroll/zoom
+- clipboard
+- mobile accessory controls
+- PTY resize
 
-1. Antigravity CLI.
-2. Linux/PRoot runtime.
-3. Android foreground service.
+The terminal uses ConnectBot's Apache-2.0 `termlib` component backed by libvterm for terminal emulation. It provides proper alternate-screen handling, ANSI/VT processing, cursor state, selection, IME input and resize behavior.
 
-## Authentication boundary
+### Default shell
 
-There is intentionally no DroidAntigravity OAuth implementation.
+The Android application does not hardcode Bash or Zsh. PRoot launches a small POSIX bootstrap shell which reads the active `user` account's shell field from `/etc/passwd`, validates it, and `exec`s that shell. The resulting shell is attached directly to the PTY.
 
-Do not add:
+### Input ordering
 
-- OAuth token entry forms.
-- App-managed Antigravity token files.
-- Environment-variable token injection.
-- Token provisioning/copying.
-- Credential databases.
-- Credential cleanup on startup.
-- Custom Google sign-in screens.
+Terminal emulator keyboard/IME callbacks and explicit paste are serialized through a FIFO PTY writer. This prevents concurrent writes from reordering fast typing or multi-line paste.
 
-If the official CLI changes how it authenticates, DroidAntigravity should continue to delegate authentication to it rather than reproducing the flow.
+### Paste
 
-If Android-specific browser handoff is required by a future CLI authentication flow, implement only the minimum browser/intent bridge required to let the official CLI flow complete. Do not handle the resulting credentials.
+Paste is sent through the terminal emulator's paste API so bracketed-paste mode can be honored by applications that support it. Android never splits pasted text into shell commands.
 
-## Remote Control URL boundary
+### Progress output
 
-The only Antigravity-specific web integration is:
+The emulator receives raw PTY bytes. Carriage returns, erase sequences, cursor movement and alternate-screen operations are interpreted by the terminal emulator. Android does not implement an application-specific percentage parser.
+
+Therefore a process that emits progress updates on one terminal line remains on one line.
+
+## Linux security/session services
+
+The rootfs contains:
 
 ```text
-agy stdout/stderr
-       │
-       ▼
-RemoteControlUrlParser
-       │
-       ▼
-validated https://antigravity.google.com/r/...
-       │
-       ├── WebView
-       └── Android browser/share
+dbus
+dbus-user-session
+gnome-keyring
+libsecret-1-0
+libsecret-tools
 ```
 
-The application does not recreate or proxy the Remote Control web application.
+`LinuxSecurityServices` verifies both package availability and real Secret Service IPC by starting a temporary `dbus-run-session`, starting `gnome-keyring-daemon --components=secrets`, and calling the `org.freedesktop.secrets` D-Bus interface.
 
-## Security
+The actual `agy` process runs in its own `dbus-run-session` with the Secret Service daemon started in that same session. Credentials remain owned by the official CLI/keyring stack.
 
-- Only validated HTTPS Antigravity Remote Control URLs are loaded by the in-app WebView.
-- OAuth/token material is not displayed, stored, logged, or exported by DroidAntigravity.
-- Diagnostic sanitization remains enabled.
-- Release signing credentials are supplied through build environment variables; no default passwords are embedded in Gradle configuration.
-- WebView does not allow cleartext network traffic.
-- Android's standard browser intents are used for external URLs.
+## Antigravity lifecycle
 
-## Foreground service
+```text
+Rootfs
+  ↓
+PRoot Linux
+  ↓
+D-Bus + Secret Service
+  ↓
+agy installed/verified
+  ↓
+capability detection
+  ↓
+official authentication
+  ↓
+agy --remote-control
+  ↓
+official Remote Control URL
+  ↓
+WebView
+```
 
-The runtime uses Android's `specialUse` foreground-service type because the core operation is a user-requested, long-running local Linux/CLI session rather than a bounded data synchronization task.
+The official background daemon capability is detected. It is not automatically selected inside PRoot because the documented Linux daemon registers a systemd user service. The current runtime uses the official interactive Remote Control mode as the PRoot-compatible path.
 
-Android 15+ applies a six-hour background timeout to `dataSync` foreground services, so `dataSync` is not appropriate for an interactive Linux/Antigravity runtime that is intended to remain alive while the user works. The manifest documents the specific local-runtime use case.
+## Endpoint abstraction
 
-## Testing priorities
+The WebView accepts an `AntigravityEndpoint`:
 
-Before release, verify on the target Android versions/devices:
+```text
+REMOTE_CONTROL
+LOCAL
+CODESPACE
+```
 
-1. Clean installation.
-2. Rootfs creation and validation.
-3. `agy --version`.
-4. First-run official authentication.
-5. Existing authenticated session reuse.
-6. Remote Control URL generation.
-7. WebView loading.
-8. Copy/open/share URL.
-9. Home/background/screen-lock lifecycle.
-10. Activity recreation without killing `agy`.
-11. Explicit Stop.
-12. Process crash/recovery.
-13. Network loss/reconnect.
-14. Diagnostic export contains no credentials.
+The primary endpoint is the official HTTPS Remote Control URL. Local HTTP is accepted only for loopback hosts (`localhost` / `127.0.0.1`), allowing a documented future local endpoint without weakening WebView cleartext policy globally. Codespace endpoints can use HTTPS without requiring WebView changes.
 
-## Design rule
+## Failure isolation
 
-> If the official Antigravity CLI already provides a capability, DroidAntigravity consumes it instead of reimplementing it.
+The Linux terminal is independent of Antigravity:
+
+```text
+Linux READY
+ ├── Terminal READY
+ └── Antigravity STARTING
+
+Antigravity FAILED
+ ├── Linux READY
+ └── Terminal READY
+
+Remote Control FAILED
+ ├── Linux READY
+ └── Terminal READY
+```
+
+Restarting Antigravity must not unnecessarily destroy the Linux terminal session. Restarting Linux is a separate operation.
+
+## Security boundary
+
+DroidAntigravity does not:
+
+- implement a custom OAuth/token database;
+- copy Antigravity credentials into Android storage;
+- recreate the Antigravity Remote Control UI;
+- silently inject trusted workspace paths;
+- use an undocumented localhost port as its primary architecture;
+- embed release signing passwords.
+
+## Production signing
+
+The Android source accepts release signing values only from explicit environment variables. `build.sh` refuses a release build when credentials are absent. The existing CI workflow is intentionally unchanged by the migration.

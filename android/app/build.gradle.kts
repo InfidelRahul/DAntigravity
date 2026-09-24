@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -26,13 +27,21 @@ android {
         ?: rootProject.file("release.keystore").takeIf { it.exists() }
         ?: file("release.keystore").takeIf { it.exists() }
 
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
+    val keyAliasValue = System.getenv("KEY_ALIAS")
+    val keyPasswordValue = System.getenv("KEY_PASSWORD")
+    val releaseSigningReady = releaseKeystore?.exists() == true &&
+        !keystorePassword.isNullOrBlank() &&
+        !keyAliasValue.isNullOrBlank() &&
+        !keyPasswordValue.isNullOrBlank()
+
     signingConfigs {
-        if (releaseKeystore?.exists() == true) {
+        if (releaseSigningReady) {
             create("release") {
                 storeFile = releaseKeystore
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "droidantigravity123"
-                keyAlias = System.getenv("KEY_ALIAS") ?: "droidantigravity"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "droidantigravity123"
+                storePassword = keystorePassword
+                keyAlias = keyAliasValue
+                keyPassword = keyPasswordValue
             }
         }
     }
@@ -40,7 +49,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            if (releaseKeystore?.exists() == true) {
+            if (releaseSigningReady) {
                 signingConfig = signingConfigs.getByName("release")
             }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -58,6 +67,7 @@ android {
     buildFeatures {
         viewBinding = true
         buildConfig = true
+        compose = true
     }
     
     packaging {
@@ -95,6 +105,16 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // ConnectBot's Apache-2.0 terminal emulator. It provides libvterm-backed
+    // VT100/xterm rendering, IME handling, selection, scrolling and resize.
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.runtime:runtime")
+    implementation("androidx.activity:activity-compose:1.11.0")
+    implementation("org.connectbot:termlib:0.3.2")
+
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation("org.tukaani:xz:1.10")
     

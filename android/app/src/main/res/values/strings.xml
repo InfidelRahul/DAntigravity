@@ -22,9 +22,7 @@
     <string name="storage_access_title">Storage Access Required</string>
     <string name="storage_access_desc">DroidAntigravity requires storage access to manage the Ubuntu Linux userspace, toolchains, and your project files.</string>
     <string name="grant_storage_access">Grant Storage Access &amp; Continue</string>
-    <string name="toggle_terminal">Toggle Terminal</string>
-    <string name="run_command">Run</string>
-    <string name="dashboard">Dashboard</string>
+<string name="dashboard">Dashboard</string>
     <string name="return_to_dashboard">Return to Dashboard</string>
 
     <!-- Local LinuxDroid Card -->
@@ -61,11 +59,7 @@
     <string name="auth_complete_msg">Authentication complete! You may now close this window.</string>
 
     <!-- Terminal Card -->
-    <string name="terminal_card_title">Ubuntu Linux Terminal</string>
-    <string name="terminal_card_subtitle">PRoot userspace &amp; AI automated coding shell</string>
-    <string name="open_terminal">Open Terminal</string>
-
-    <!-- Open Ports Card -->
+<!-- Open Ports Card -->
     <string name="open_ports_title">Open Ports</string>
     <string name="open_ports_subtitle">Active listening ports in Linux userspace</string>
     <string name="no_open_ports">No open ports detected</string>
@@ -108,16 +102,7 @@
     <string name="mobile_mode">Mobile Mode</string>
 
     <!-- Terminal Controls -->
-    <string name="scroll_to_bottom">Scroll to bottom ↓</string>
-    <string name="key_esc">ESC</string>
-    <string name="key_tab">TAB</string>
-    <string name="key_ctrl">CTRL</string>
-    <string name="key_alt">ALT</string>
-    <string name="key_ctrl_c">^C</string>
-    <string name="key_ctrl_x">^X</string>
-    <string name="key_ctrl_o">^O</string>
-    <string name="key_ctrl_k">^K</string>
+<string name="key_ctrl_k">^K</string>
     <string name="key_ctrl_l">^L</string>
-    <string name="key_clear">Clear</string>
-    <string name="open_service">Open</string>
+<string name="open_service">Open</string>
 </resources>

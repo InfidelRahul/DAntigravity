@@ -56,7 +56,25 @@ object NativeSpawn {
         rows: Int = 24
     ): IntArray?
 
+    /**
+     * Spawn a true interactive PTY. The returned array is [pid, masterFd].
+     * The caller owns the master fd and is responsible for reading/writing it.
+     */
+    external fun spawnPtyInteractive(
+        argv: Array<String>,
+        envp: Array<String>,
+        cwd: String,
+        cols: Int = 80,
+        rows: Int = 24
+    ): IntArray?
+
     external fun write(fd: Int, data: ByteArray): Int
+
+    /** Reads up to data.size bytes from a PTY/file descriptor. */
+    external fun read(fd: Int, data: ByteArray): Int
+
+    /** Updates the PTY window size. */
+    external fun resizePty(fd: Int, cols: Int, rows: Int): Int
 
     fun writeString(fd: Int, str: String): Boolean {
         val bytes = str.toByteArray(Charsets.UTF_8)

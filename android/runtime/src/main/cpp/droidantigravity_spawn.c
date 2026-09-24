@@ -302,6 +302,87 @@ static jintArray native_spawn_pty_streams_impl(JNIEnv *env, jobjectArray java_ar
     return result;
 }
 
+
+static jintArray native_spawn_pty_interactive_impl(JNIEnv *env, jobjectArray java_argv,
+                                                    jobjectArray java_env, jstring java_cwd,
+                                                    jint cols, jint rows) {
+    jsize argc = (*env)->GetArrayLength(env, java_argv);
+    jsize envc = (*env)->GetArrayLength(env, java_env);
+    char **argv = calloc((size_t)argc + 1, sizeof(char *));
+    char **envp = calloc((size_t)envc + 1, sizeof(char *));
+    if (!argv || !envp) { free(argv); free(envp); return NULL; }
+
+    for (jsize i = 0; i < argc; i++) {
+        jstring value = (jstring)(*env)->GetObjectArrayElement(env, java_argv, i);
+        const char *utf = (*env)->GetStringUTFChars(env, value, NULL);
+        argv[i] = strdup(utf);
+        (*env)->ReleaseStringUTFChars(env, value, utf);
+        (*env)->DeleteLocalRef(env, value);
+    }
+    for (jsize i = 0; i < envc; i++) {
+        jstring value = (jstring)(*env)->GetObjectArrayElement(env, java_env, i);
+        const char *utf = (*env)->GetStringUTFChars(env, value, NULL);
+        envp[i] = strdup(utf);
+        (*env)->ReleaseStringUTFChars(env, value, utf);
+        (*env)->DeleteLocalRef(env, value);
+    }
+
+    const char *cwd_utf = (*env)->GetStringUTFChars(env, java_cwd, NULL);
+    char *cwd = strdup(cwd_utf);
+    (*env)->ReleaseStringUTFChars(env, java_cwd, cwd_utf);
+
+    int master = -1, slave = -1;
+    struct winsize ws;
+    memset(&ws, 0, sizeof(ws));
+    ws.ws_col = (unsigned short)(cols > 0 ? cols : 80);
+    ws.ws_row = (unsigned short)(rows > 0 ? rows : 24);
+
+    if (openpty(&master, &slave, NULL, NULL, &ws) != 0) {
+        LOGE("openpty interactive failed: %s", strerror(errno));
+        for (jsize i = 0; i < argc; i++) free(argv[i]);
+        for (jsize i = 0; i < envc; i++) free(envp[i]);
+        free(argv); free(envp); free(cwd);
+        return NULL;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(master);
+        if (setsid() < 0) _exit(126);
+        if (ioctl(slave, TIOCSCTTY, 0) < 0) _exit(126);
+
+        dup2(slave, STDIN_FILENO);
+        dup2(slave, STDOUT_FILENO);
+        dup2(slave, STDERR_FILENO);
+        if (slave > STDERR_FILENO) close(slave);
+
+        if (chdir(cwd) != 0) {
+            dprintf(STDERR_FILENO, "Failed to chdir to %s: %s\n", cwd, strerror(errno));
+            _exit(126);
+        }
+        prctl(PR_SET_DUMPABLE, 1, 0, 0, 0);
+        execve(argv[0], argv, envp);
+        dprintf(STDERR_FILENO, "Native exec failed (%s): %s\n", argv[0], strerror(errno));
+        _exit(127);
+    }
+
+    close(slave);
+    for (jsize i = 0; i < argc; i++) free(argv[i]);
+    for (jsize i = 0; i < envc; i++) free(envp[i]);
+    free(argv); free(envp); free(cwd);
+
+    if (pid < 0) {
+        close(master);
+        return NULL;
+    }
+    setpgid(pid, pid);
+
+    jint values[2] = {pid, master};
+    jintArray result = (*env)->NewIntArray(env, 2);
+    (*env)->SetIntArrayRegion(env, result, 0, 2, values);
+    return result;
+}
+
 static jint native_wait_for_impl(jint pid, jboolean no_hang) {
     int status = 0;
     pid_t value = waitpid(pid, &status, no_hang ? WNOHANG : 0);
@@ -375,6 +456,40 @@ JNIEXPORT jint JNICALL
 Java_com_droidantigravity_runtime_NativeSpawn_write(JNIEnv *env, jobject self, jint fd, jbyteArray data) {
     (void)self;
     return native_write_impl(env, fd, data);
+}
+
+JNIEXPORT jintArray JNICALL
+Java_com_droidantigravity_runtime_NativeSpawn_spawnPtyInteractive(JNIEnv *env, jobject self,
+                                                                   jobjectArray java_argv,
+                                                                   jobjectArray java_env, jstring java_cwd,
+                                                                   jint cols, jint rows) {
+    (void)self;
+    return native_spawn_pty_interactive_impl(env, java_argv, java_env, java_cwd, cols, rows);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_droidantigravity_runtime_NativeSpawn_read(JNIEnv *env, jobject self, jint fd, jbyteArray java_data) {
+    (void)self;
+    if (fd < 0 || !java_data) return -1;
+    jsize len = (*env)->GetArrayLength(env, java_data);
+    if (len <= 0) return 0;
+    jbyte *bytes = (*env)->GetByteArrayElements(env, java_data, NULL);
+    ssize_t n;
+    do { n = read(fd, bytes, (size_t)len); } while (n < 0 && errno == EINTR);
+    (*env)->ReleaseByteArrayElements(env, java_data, bytes, 0);
+    if (n < 0) return -errno;
+    return (jint)n;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_droidantigravity_runtime_NativeSpawn_resizePty(JNIEnv *env, jobject self, jint fd, jint cols, jint rows) {
+    (void)env; (void)self;
+    if (fd < 0) return -1;
+    struct winsize ws;
+    memset(&ws, 0, sizeof(ws));
+    ws.ws_col = (unsigned short)(cols > 0 ? cols : 80);
+    ws.ws_row = (unsigned short)(rows > 0 ? rows : 24);
+    return ioctl(fd, TIOCSWINSZ, &ws);
 }
 
 JNIEXPORT jint JNICALL

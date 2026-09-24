@@ -17,6 +17,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.ui.platform.ComposeView
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -29,6 +30,8 @@ import com.droidantigravity.core.Result
 import com.droidantigravity.core.diagnostics.DiagnosticLogger
 import com.droidantigravity.diagnostics.ExportLogManager
 import com.droidantigravity.web.AntigravityWebView
+import com.droidantigravity.terminal.PtyTerminalSession
+import com.droidantigravity.terminal.TerminalScreen
 import kotlinx.coroutines.launch
 
 /**
@@ -54,6 +57,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var retryButton: Button
     private lateinit var viewLogsButton: Button
     private lateinit var exportLogsButton: Button
+    private lateinit var terminalButton: Button
+    private lateinit var terminalContainer: FrameLayout
+    private lateinit var floatingTerminalButton: Button
+    private var terminalSession: PtyTerminalSession? = null
     @Volatile private var currentRemoteControlUrl: String? = null
 
     @Volatile private var activeDiagnosticId: String? = null
@@ -180,6 +187,14 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { exportDiagnosticBundle() }
         }
 
+        terminalButton = Button(this).apply {
+            text = "Terminal"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#242428"))
+            visibility = View.GONE
+            setOnClickListener { showTerminal() }
+        }
+
         val btnLp = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -188,12 +203,18 @@ class MainActivity : AppCompatActivity() {
         buttonRow.addView(retryButton, btnLp)
         buttonRow.addView(viewLogsButton, btnLp)
         buttonRow.addView(exportLogsButton, btnLp)
+        buttonRow.addView(terminalButton, btnLp)
 
         statusContainer.addView(progress)
         statusContainer.addView(statusTitle)
         statusContainer.addView(statusText)
         statusContainer.addView(diagnosticIdText)
         statusContainer.addView(buttonRow)
+
+        terminalContainer = FrameLayout(this).apply {
+            visibility = View.GONE
+            setBackgroundColor(Color.BLACK)
+        }
 
         root.addView(webContainer)
         root.addView(
@@ -202,6 +223,30 @@ class MainActivity : AppCompatActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
+        )
+        root.addView(
+            terminalContainer,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        // A small native control keeps the official Antigravity WebView untouched
+        // while making the independent Linux terminal reachable at any time.
+        floatingTerminalButton = Button(this).apply {
+            text = "⌘"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.parseColor("#242428"))
+            visibility = View.GONE
+            setOnClickListener { showTerminal() }
+        }
+        root.addView(
+            floatingTerminalButton,
+            FrameLayout.LayoutParams(52, 52, Gravity.BOTTOM or Gravity.END).apply {
+                setMargins(0, 0, 18, 24)
+            }
         )
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
@@ -332,6 +377,8 @@ class MainActivity : AppCompatActivity() {
             currentRemoteControlUrl = url
             statusContainer.visibility = View.GONE
             buttonRow.visibility = View.GONE
+            terminalContainer.visibility = View.GONE
+            floatingTerminalButton.visibility = View.VISIBLE
             webContainer.visibility = View.VISIBLE
 
             try {
@@ -340,6 +387,49 @@ class MainActivity : AppCompatActivity() {
                 DiagnosticLogger.e(TAG, "webview_load_error", "Failed to load Remote Control URL: ${e.message}", e)
                 showError("Load Error", "Unable to open Antigravity Remote Control.", activeDiagnosticId)
             }
+        }
+    }
+
+    private fun showTerminal() {
+        if (!runtimeController.isLinuxRunning()) {
+            Toast.makeText(this, "Linux userspace is not ready yet", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        webContainer.visibility = View.GONE
+        statusContainer.visibility = View.GONE
+        terminalContainer.visibility = View.VISIBLE
+        floatingTerminalButton.visibility = View.GONE
+
+        if (terminalSession == null || !terminalSession!!.isRunning()) {
+            terminalSession?.close()
+            terminalSession = PtyTerminalSession(runtimeController.linuxRuntime)
+            val composeView = ComposeView(this).apply {
+                setContent {
+                    TerminalScreen(
+                        session = terminalSession!!,
+                        onClose = { hideTerminal() }
+                    )
+                }
+            }
+            terminalContainer.removeAllViews()
+            terminalContainer.addView(
+                composeView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+    }
+
+    private fun hideTerminal() {
+        terminalContainer.visibility = View.GONE
+        floatingTerminalButton.visibility = if (!currentRemoteControlUrl.isNullOrBlank()) View.VISIBLE else View.GONE
+        if (!currentRemoteControlUrl.isNullOrBlank()) {
+            webContainer.visibility = View.VISIBLE
+        } else {
+            statusContainer.visibility = View.VISIBLE
         }
     }
 
@@ -375,7 +465,12 @@ class MainActivity : AppCompatActivity() {
             progress.visibility = if (showProgress) View.VISIBLE else View.GONE
             statusTitle.visibility = View.GONE
             diagnosticIdText.visibility = View.GONE
-            buttonRow.visibility = View.GONE
+            val linuxReady = runtimeController.isLinuxRunning()
+            retryButton.visibility = View.GONE
+            viewLogsButton.visibility = View.GONE
+            exportLogsButton.visibility = View.GONE
+            terminalButton.visibility = if (linuxReady) View.VISIBLE else View.GONE
+            buttonRow.visibility = if (linuxReady) View.VISIBLE else View.GONE
             statusText.text = message
         }
     }
@@ -398,6 +493,7 @@ class MainActivity : AppCompatActivity() {
             retryButton.visibility = View.VISIBLE
             viewLogsButton.visibility = View.VISIBLE
             exportLogsButton.visibility = View.VISIBLE
+            terminalButton.visibility = if (runtimeController.isLinuxRunning()) View.VISIBLE else View.GONE
         }
     }
 
@@ -419,6 +515,7 @@ class MainActivity : AppCompatActivity() {
             retryButton.visibility = View.VISIBLE
             viewLogsButton.visibility = View.VISIBLE
             exportLogsButton.visibility = View.VISIBLE
+            terminalButton.visibility = if (runtimeController.isLinuxRunning()) View.VISIBLE else View.GONE
         }
     }
 
@@ -486,6 +583,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        terminalSession?.close()
+        terminalSession = null
         browser.destroy()
         super.onDestroy()
     }

@@ -1,208 +1,125 @@
-# DroidAntigravity — VS Code for Android
+# DroidAntigravity — Antigravity for Android
 
-[![DroidAntigravity CI & Signed Release Build](https://github.com/InfidelRahul/DroidAntigravity/actions/workflows/ci.yml/badge.svg)](https://github.com/InfidelRahul/DroidAntigravity/actions/workflows/ci.yml)
-[![Platform](https://img.shields.io/badge/Platform-Android%209.0%2B%20(API%2028--36)-green.svg)](https://developer.android.com)
-[![Architecture](https://img.shields.io/badge/Architecture-ARM64%20(16KB%20Aligned)-blue.svg)](https://developer.android.com/guide/practices/page-sizes)
-[![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](LICENSE)
+DroidAntigravity is a native Android host for the official Google Antigravity CLI (`agy`) running inside a persistent Ubuntu ARM64 Linux userspace powered by LinuxDroid PRoot.
 
-**DroidAntigravity** is a native Android application that runs a complete, persistent Visual Studio Code environment locally on Android devices without requiring root access.
+The Android app does not recreate the Antigravity desktop UI. It provides the Linux runtime, process lifecycle, a real Linux PTY terminal, and a full-screen WebView for the official Antigravity Remote Control UI.
 
-The application embeds an Ubuntu ARM64 Linux userspace powered by **LinuxDroid PRoot**, manages the official **Microsoft Visual Studio Code CLI (`code serve-web`)** on local loopback, provides a dedicated **Android ↔ Linux Authentication Bridge**, and renders a fully responsive, hardware-accelerated **Android WebView** user interface with edge-to-edge safe area support.
+## Architecture
 
----
+```text
+Android
+├── MainActivity
+│   ├── Official Antigravity WebView
+│   └── Touch-first macOS-inspired Terminal UI
+│
+├── RuntimeController
+│   ├── Ubuntu rootfs
+│   ├── PRoot runtime
+│   ├── D-Bus + Secret Service readiness
+│   └── Antigravity lifecycle
+│
+└── NativeSpawn
+    ├── process groups
+    ├── PTY creation
+    ├── PTY read/write
+    └── PTY resize
 
-## Highlights
-
-- **No Root Required**: Executes fully within user application sandbox using PRoot syscall emulation.
-- **100% Local & Offline**: Serves VS Code directly over `http://127.0.0.1:<dynamic-port>` without external cloud or tunnel dependencies.
-- **Dedicated Android ↔ Linux Auth Bridge**: Lightweight loopback IPC endpoint enabling guest tools to trigger Android browser auth flows and receive single-use, session-scoped callbacks.
-- **Edge-to-Edge Safe Area Insets**: Uses `WindowInsetsCompat` to adapt dynamically to status bars, display cutouts/notches, gesture navigation bars, and soft keyboards across all Android versions (including Android 15 & 16).
-- **Streamlined UI Experience**: Post-setup landing view is the VS Code editor directly, with the Linux terminal retained as a toggleable diagnostic/CLI console.
-- **Android 15/16 Ready**: All native binaries (`libproot.so`, `libdroidantigravityspawn.so`, etc.) compiled with **16KB page-size alignment** (`-Wl,-z,max-page-size=16384`).
-- **Complete Development Toolchain**: Ubuntu ARM64 userspace with Python 3, Git, Node.js, npm, and apt package manager.
-- **Robust Process Supervision**: Custom JNI process spawner with POSIX process group isolation (`setpgid`) and clean group termination.
-- **Persistent Workspace**: User files saved permanently in `/home/user/projects` inside internal app storage.
-- **Foreground Service Persistence**: Ongoing foreground service with wake lock ensures background compilation tasks are not terminated by Android OOM killer.
-- **Automated CI & Signed Releases**: Unified GitHub Actions pipeline automatically tests and builds signed release APKs.
-
----
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Android Host Layer                       │
-│                                                             │
-│   ┌───────────────────┐        ┌────────────────────────┐   │
-│   │   MainActivity    │◄───────┤   RuntimeController    │   │
-│   │  (WebView Host)   │ State  │  (Singleton Manager)   │   │
-│   └─────────┬─────────┘        └───────────┬────────────┘   │
-│             │ http://127.0.0.1:<port>      │ Starts / Stops │
-│             │ (Local Web Server)           ▼                │
-│             │                  ┌────────────────────────┐   │
-│             │                  │  LinuxRuntimeService   │   │
-│             │                  │  (Foreground Service)  │   │
-│             │                  └───────────┬────────────┘   │
-│             ▼                              │                │
-│   ┌───────────────────┐        ┌───────────┴────────────┐   │
-│   │   VsCodeWebView   │        │   AuthBridgeServer     │   │
-│   └───────────────────┘        │ (127.0.0.1:<bridgePort>)   │
-│                                └───────────┬────────────┘   │
-│                                            │ Spawns JNI     │
-│                                            ▼                │
-│                                ┌────────────────────────┐   │
-│                                │   NativeSpawn (JNI)    │   │
-│                                └───────────┬────────────┘   │
-└────────────────────────────────────────────┼────────────────┘
-                                             │ fork() / execve()
-┌────────────────────────────────────────────▼────────────────┐
-│                    Linux Userspace Layer                    │
-│                                                             │
-│   ┌─────────────────────────────────────────────────────┐   │
-│   │      LinuxDroid PRoot Engine (libproot.so)          │   │
-│   │   - 16KB ELF page alignment for modern kernels      │   │
-│   │   - Fake root & syscall translation layer           │   │
-│   └──────────────────────────┬──────────────────────────┘   │
-│                              │                              │
-│   ┌──────────────────────────▼──────────────────────────┐   │
-│   │              Ubuntu ARM64 Userspace                 │   │
-│   │  - /bin/bash, Python 3, Git                         │   │
-│   │  - /usr/local/bin/code serve-web (Local Server)     │   │
-│   │  - /usr/local/bin/droidantigravity-auth (Auth helper)        │   │
-│   │  - /home/user/projects (Workspaces)                 │   │
-│   └─────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+Ubuntu ARM64 / PRoot
+├── configured Linux user
+├── user's default login shell
+├── nano / vim / htop / less / ssh / TUI applications
+├── D-Bus session + GNOME Keyring Secret Service
+└── official agy CLI
+      └── official Remote Control reverse tunnel
+             └── https://antigravity.google.com/r/...
 ```
 
-For in-depth architectural details, refer to [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## Real Linux terminal
 
----
+The terminal is a real PTY-backed Linux terminal, not an Android command console.
 
-## Prerequisites
+- The active Linux user's configured shell is launched from `/etc/passwd`.
+- Android does not maintain shell history, cwd, prompt, aliases, environment, pipes, redirection, or job control.
+- The shell owns all shell semantics.
+- The terminal emulator is libvterm-backed and handles ANSI/VT control sequences, alternate screens, cursor movement, colors, resize, scrolling and selection.
+- Interactive programs such as `nano`, `vim`, `less`, `htop`, `ssh` and other TUI applications are intended to run normally.
+- Keyboard and paste input are serialized through a PTY input queue so fast typing and multi-line paste retain ordering.
+- Paste uses the terminal emulator's bracketed-paste-aware path when supported by the application.
+- Progress output using carriage returns/control sequences updates the existing terminal line instead of being converted into repeated Android text lines.
+- The terminal remains independently usable when Antigravity fails or its Remote Control connection is unavailable.
 
-To build DroidAntigravity locally from source, ensure you have:
+The terminal UI is deliberately touch-first and macOS-inspired: compact title-bar treatment, comfortable touch controls, long-press selection, pinch/scroll support, and an accessory row for common terminal keys.
 
-- **Operating System**: Linux or macOS (x86_64 or Apple Silicon)
-- **JDK**: Java Development Kit 21 (Temurin or OpenJDK recommended)
-- **Android SDK**: API Level 36 (`platform-tools`, `platforms;android-36`, `build-tools;35.0.0`)
-- **Android NDK**: NDK revision `29.0.14206865` (r29)
-- **CMake**: Version 3.22.1 or newer
-- **Git**: With submodule support enabled
+## Antigravity boundary
 
----
+DroidAntigravity delegates to the official `agy` CLI for:
 
-## Building from Source
+- authentication
+- credential persistence
+- conversations
+- agent execution
+- project state
+- Remote Control
 
-### 1. Clone Repository & Submodules
+The app does not implement a custom OAuth/token store.
+
+The Linux userspace installs and verifies:
+
+- `dbus`
+- `dbus-user-session`
+- `gnome-keyring`
+- `libsecret-1-0`
+- `libsecret-tools`
+
+The Antigravity process is started inside a `dbus-run-session` with the Secret Service component of GNOME Keyring so the CLI and its keyring share the same session bus.
+
+The official interactive Remote Control mode (`agy --remote-control`) is the reliable mode for the PRoot userspace. The official background daemon is capability-detected but is not blindly forced because its documented Linux implementation relies on a systemd user service, which is not provided by PRoot.
+
+## Build
+
+Requirements:
+
+- JDK 21
+- Android SDK API 36
+- Android NDK `29.0.14206865`
+- CMake 3.22.1+
+- Git with submodule support
+
+Debug/development build:
 
 ```bash
-git clone --recursive https://github.com/InfidelRahul/DroidAntigravity.git
-cd DroidAntigravity
-```
-
-If already cloned without submodules:
-```bash
-git submodule update --init --recursive
-```
-
-### 2. Configure Environment
-
-Set the paths to your Android SDK and NDK:
-```bash
-export ANDROID_HOME=/path/to/android-sdk
-export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865
-```
-*(Or create `android/local.properties` containing `sdk.dir=/path/to/android-sdk`)*
-
-### 3. Build APK
-
-Using the unified build script:
-
-```bash
-# Build Signed Release APK (default)
-./build.sh release
-
-# Build Debug APK
 ./build.sh debug
 ```
 
-Or using Gradle directly:
+Release builds require explicit signing credentials:
 
 ```bash
-cd android
-
-# Run unit tests
-./gradlew test
-
-# Assemble Signed Release APK
-./gradlew assembleRelease
-
-# Output APK: android/app/build/outputs/apk/release/app-release.apk
+export KEYSTORE_FILE=/path/to/release.keystore
+export KEYSTORE_PASSWORD='...'
+export KEY_ALIAS='...'
+export KEY_PASSWORD='...'
+./build.sh release
 ```
 
----
+No default release keystore password is embedded in the source or CI configuration.
 
-## Installation & Running
+## Project structure
 
-1. Enable **Install from Unknown Sources** in Android Settings.
-2. Install the generated APK onto your Android device:
-   ```bash
-   adb install android/app/build/outputs/apk/release/app-release.apk
-   ```
-3. Launch **DroidAntigravity**. On first boot:
-   - Downloads and verifies the Ubuntu ARM64 userspace.
-   - Configures guest networking and DNS.
-   - Unpacks and starts VS Code Server.
-   - Loads the VS Code IDE in the WebView.
+```text
+android/
+├── app/           Android UI, terminal integration, lifecycle
+├── core/          App state, paths, common runtime models
+├── runtime/       PRoot runtime and native PTY/process layer
+├── rootfs/        Ubuntu ARM64 installation/configuration
+├── antigravity/   Official agy installation, lifecycle and Remote Control
+├── web/           Official Antigravity endpoint/WebView integration
+└── diagnostics/   Runtime and failure diagnostics
 
----
-
-## Project Structure
-
-```
-DroidAntigravity/
-├── .github/workflows/
-│   ├── ci.yml                 # Unified CI & Signed Release Build workflow
-│   └── README.md              # CI/CD workflow documentation
-├── android/
-│   ├── app/                   # Android UI, MainActivity, Foreground Service
-│   ├── core/                  # AppPaths, AvsLogger, RuntimeState models
-│   ├── runtime/               # PRoot engine, JNI droidantigravity_spawn, LinuxRuntime
-│   ├── rootfs/                # RootfsInstaller (Ubuntu ARM64 base + DNS/APT)
-│   ├── vscode/                # VsCodeCliManager (Microsoft VS Code CLI & Tunnel)
-│   ├── web/                   # VsCodeWebView (Chromium WebView & keyboard bridge)
-│   └── diagnostics/           # RuntimeDiagnostics & health checks
-├── docs/
-│   └── ARCHITECTURE.md        # In-depth architectural documentation
-├── proot-repo/                # LinuxDroid PRoot Git submodule (arm64-v8a)
-├── build.sh                   # Unified local build script (debug/release)
-└── README.md                  # Project overview
+proot-repo/        LinuxDroid PRoot submodule
+docs/              Architecture documentation
+build.sh           Local build entry point
 ```
 
----
+## License
 
-## License & Acknowledgments
-
-- **DroidAntigravity**: Apache License 2.0
-- **PRoot**: GPL v2 ([LinuxDroid](https://github.com/LinuxDroidapp/proot))
-- **VS Code CLI**: Microsoft Corporation ([Visual Studio Code](https://code.visualstudio.com))
-- **Ubuntu Base**: Canonical Ltd.
-
-
-## Current architecture boundary
-
-DroidAntigravity is intentionally a thin Android host for the official Google Antigravity CLI.
-
-The application provides:
-- a persistent ARM64 Linux/PRoot userspace;
-- installation and lifecycle management for the official `agy` CLI;
-- an Android foreground service so the Linux/CLI process can continue while the Activity is backgrounded;
-- Android WebView support for the official Antigravity Remote Control URL;
-- standard Android copy/share/open-in-browser actions;
-- diagnostics for the Android/Linux/process/WebView layers.
-
-The application does **not** implement Antigravity authentication, OAuth token entry, credential provisioning, credential storage, conversation storage, agent execution, or the Remote Control web UI. Those capabilities remain owned by the official CLI.
-
-The official Remote Control URL is a normal HTTPS URL and can be opened either in the in-app WebView or an external Android browser.
-
-See `docs/ARCHITECTURE.md` for the current architecture and migration boundary.
+DroidAntigravity is Apache License 2.0. Third-party dependencies retain their respective licenses.

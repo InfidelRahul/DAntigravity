@@ -19,7 +19,6 @@ data class AboutInfo(
     val projectsPath: String,
     val rootfsPath: String
 ) {
-    val vsCodeVersion: String get() = antigravityVersion
 }
 
 class AboutInfoProvider(private val context: Context) {

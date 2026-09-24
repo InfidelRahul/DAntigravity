@@ -49,7 +49,7 @@ endif()
 message(STATUS "Including LinuxDroid PRoot from: ${PROOT_REPO_DIR}")
 add_subdirectory("${PROOT_REPO_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/proot_build")
 
-# AVscode Native Spawner
+# Native process and PTY spawner
 add_library(droidantigravityspawn SHARED "${CMAKE_CURRENT_SOURCE_DIR}/droidantigravity_spawn.c")
 target_compile_options(droidantigravityspawn PRIVATE
     -Wall -Wextra -O2

@@ -509,7 +509,7 @@ class RootfsInstaller(private val context: Context) {
         // 4. Session environment (/etc/environment)
         val envFile = File(rootfsDir, "etc/environment")
         envFile.delete()
-        envFile.writeText("PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"\nLANG=\"C.UTF-8\"\nSHELL=\"/bin/bash\"\n")
+        envFile.writeText("PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"\nLANG=\"C.UTF-8\"\n")
         envFile.setReadable(true, false)
 
         // 5. APT configuration & daemon policy
@@ -569,7 +569,6 @@ class RootfsInstaller(private val context: Context) {
             userProfile.writeText(
                 """
                 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-                export SHELL=/bin/bash
                 export LANG=C.UTF-8
                 """.trimIndent() + "\n"
             )
@@ -666,7 +665,12 @@ class RootfsInstaller(private val context: Context) {
             |    wget \
             |    git \
             |    python3 \
-            |    procps || {
+            |    procps \
+            |    dbus \
+            |    dbus-user-session \
+            |    gnome-keyring \
+            |    libsecret-1-0 \
+            |    libsecret-tools || {
             |    echo "ERROR: Failed to install core development packages" >&2
             |    exit 3
             |}
@@ -676,15 +680,14 @@ class RootfsInstaller(private val context: Context) {
             |if ! id -u user >/dev/null 2>&1; then
             |    useradd -m -s /bin/bash user || true
             |fi
-            |mkdir -p /home/user/projects /home/user/.vscode-cli /tmp
+            |mkdir -p /home/user/projects /tmp
             |chmod 1777 /tmp
             |chown -R user:user /home/user || true
             |chmod 755 /home/user
             |
             |if [ ! -f /home/user/.profile ]; then
             |    cat <<'EOF' > /home/user/.profile
-            |export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-            |export SHELL=/bin/bash
+            |export PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             |export LANG=C.UTF-8
             |EOF
             |    chown user:user /home/user/.profile || true

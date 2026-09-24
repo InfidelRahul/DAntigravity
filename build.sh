@@ -76,18 +76,12 @@ if [ "$BUILD_TYPE" = "debug" ]; then
     ./gradlew assembleDebug --no-configuration-cache
     APK="${ANDROID_DIR}/app/build/outputs/apk/debug/app-debug.apk"
 else
-    # Check if release keystore exists or create a temporary fallback one
-    if [ ! -f "${ANDROID_DIR}/release.keystore" ]; then
-        echo "Generating release keystore for local build..."
-        keytool -genkeypair -v -keystore "${ANDROID_DIR}/release.keystore" \
-            -alias droidantigravity -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass droidantigravity123 -keypass droidantigravity123 \
-            -dname "CN=DroidAntigravity, OU=Mobile, O=DroidAntigravity, L=City, S=State, C=US"
+    if [ -z "${KEYSTORE_FILE:-}" ] || [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_ALIAS:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
+        echo "ERROR: Release signing credentials are required."
+        echo "Set KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD."
+        echo "Use ./build.sh debug for unsigned/development testing."
+        exit 1
     fi
-    export KEYSTORE_FILE="${KEYSTORE_FILE:-${ANDROID_DIR}/release.keystore}"
-    export KEYSTORE_PASSWORD="${KEYSTORE_PASSWORD:-droidantigravity123}"
-    export KEY_ALIAS="${KEY_ALIAS:-droidantigravity}"
-    export KEY_PASSWORD="${KEY_PASSWORD:-droidantigravity123}"
 
     ./gradlew assembleRelease --no-configuration-cache
     if [ -f "${ANDROID_DIR}/app/build/outputs/apk/release/app-release.apk" ]; then

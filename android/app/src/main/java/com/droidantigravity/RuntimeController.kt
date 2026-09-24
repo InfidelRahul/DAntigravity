@@ -49,6 +49,7 @@ class RuntimeController private constructor(private val context: Context) {
     val paths = AppPaths.getInstance(context)
     val rootfsInstaller = RootfsInstaller(context)
     val linuxRuntime = PRootRuntime(context, rootfsInstaller)
+    val linuxSecurityServices = com.droidantigravity.runtime.LinuxSecurityServices(linuxRuntime)
     val antigravityManager = AntigravityManager(context, linuxRuntime)
 
     private val _appState = MutableStateFlow<AppState>(AppState.NotInstalled)
@@ -102,6 +103,7 @@ class RuntimeController private constructor(private val context: Context) {
 
                 ensureRootfs()
                 ensureLinux()
+                ensureLinuxSecurityServices()
                 ensureAntigravity()
 
                 _appState.value = AppState.StartingAntigravityServer(
@@ -182,6 +184,17 @@ class RuntimeController private constructor(private val context: Context) {
         log("[Linux] Guest userspace verified.")
     }
 
+    private suspend fun ensureLinuxSecurityServices() {
+        _appState.value = AppState.InstallingPackages(
+            "Preparing D-Bus and Linux Secret Service…"
+        )
+        log("[Linux] Verifying D-Bus and Secret Service support.")
+        linuxSecurityServices.ensureInstalled().getOrThrow()
+        linuxSecurityServices.verifySecretService().getOrThrow()
+        _appState.value = AppState.LinuxReady
+        log("[Linux] D-Bus and Secret Service are operational.")
+    }
+
     private suspend fun ensureAntigravity() {
         if (!antigravityManager.isInstalled()) {
             _appState.value = AppState.InstallingAntigravity(
@@ -193,9 +206,12 @@ class RuntimeController private constructor(private val context: Context) {
         }
 
         _appState.value = AppState.AntigravityReady
-        val version = antigravityManager.version().getOrNull()?.trim()
-        if (!version.isNullOrBlank()) {
-            log("[Antigravity] $version")
+        val capabilities = antigravityManager.capabilities().getOrNull()
+        if (capabilities != null) {
+            log("[Antigravity] ${capabilities.version}; interactive Remote Control=${capabilities.interactiveRemoteControl}; daemon capability=${capabilities.remoteControlDaemon}")
+        } else {
+            val version = antigravityManager.version().getOrNull()?.trim()
+            if (!version.isNullOrBlank()) log("[Antigravity] $version")
         }
     }
 

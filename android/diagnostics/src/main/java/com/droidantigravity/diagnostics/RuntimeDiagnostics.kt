@@ -296,7 +296,6 @@ data class DiagnosticsReport(
     val networkInfo: NetworkInfo,
     val logEntries: List<AvsLogger.LogEntry>
 ) {
-    val vscodeInfo: AntigravityInfo get() = antigravityInfo
 }
 
 data class AndroidInfo(
@@ -323,8 +322,6 @@ data class StorageInfo(
     val rootfsInstalled: Boolean,
     val antigravityInstalled: Boolean
 ) {
-    val vsCodeCliInstalled: Boolean get() = antigravityInstalled
-    val codeServerInstalled: Boolean get() = antigravityInstalled
 }
 
 data class RootfsInfo(
@@ -360,8 +357,6 @@ data class AntigravityInfo(
     val installPath: String,
     val version: String?
 )
-
-typealias VsCodeInfo = AntigravityInfo
 
 data class NetworkInfo(
     val hasInternetPermission: Boolean,

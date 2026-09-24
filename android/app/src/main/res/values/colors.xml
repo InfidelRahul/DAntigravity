@@ -9,15 +9,11 @@
     <color name="loading_background">#F8F9FA</color>
     <color name="editor_background">#1E1E1E</color>
     <color name="antigravity_background">#1E1E1E</color>
-    <color name="vscode_background">#1E1E1E</color>
     <color name="accent">#007ACC</color>
     <color name="accent_container">#E1F0FF</color>
     <color name="text_primary">#1F1F1F</color>
     <color name="text_secondary">#666666</color>
-    <color name="terminal_background">#121212</color>
-    <color name="terminal_text">#4AF626</color>
-    <color name="terminal_secondary">#9CDCFE</color>
-    <color name="badge_background">#E3F2FD</color>
+<color name="badge_background">#E3F2FD</color>
     <color name="badge_text">#0D47A1</color>
     <color name="success_color">#2E7D32</color>
     <color name="error_color">#C62828</color>
