@@ -34,6 +34,7 @@ class LinuxSecurityServices(private val linuxRuntime: PRootRuntime) {
             ) { output ->
                 AvsLogger.d(TAG, output.trim())
             }.getOrThrow()
+            Unit
         }
     }
 
@@ -59,6 +60,7 @@ class LinuxSecurityServices(private val linuxRuntime: PRootRuntime) {
             }.getOrThrow().also { code ->
                 check(code == 0) { "Secret Service D-Bus verification failed with exit code $code" }
             }
+            Unit
         }
     }
 }

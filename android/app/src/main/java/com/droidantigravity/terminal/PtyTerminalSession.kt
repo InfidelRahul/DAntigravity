@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import android.os.Looper
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -97,7 +98,7 @@ class PtyTerminalSession(
     private suspend fun readLoop() {
         val buffer = ByteArray(READ_BUFFER_SIZE)
         try {
-            while (isActive && masterFd >= 0) {
+            while (currentCoroutineContext().isActive && masterFd >= 0) {
                 val count = NativeSpawn.read(masterFd, buffer)
                 when {
                     count > 0 -> {
