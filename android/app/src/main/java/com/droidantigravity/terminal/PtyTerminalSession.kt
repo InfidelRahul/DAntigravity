@@ -31,6 +31,21 @@ class PtyTerminalSession(
     private val cols: Int = DEFAULT_COLS,
     private val rows: Int = DEFAULT_ROWS
 ) {
+    private var attachedPty: IntArray? = null
+
+    /**
+     * Creates a terminal session around an already-running PTY process, such as
+     * the Antigravity CLI authentication session.
+     */
+    constructor(
+        linuxRuntime: PRootRuntime,
+        attachedPty: IntArray,
+        cols: Int = DEFAULT_COLS,
+        rows: Int = DEFAULT_ROWS
+    ) : this(linuxRuntime, cols, rows) {
+        require(attachedPty.size >= 2) { "attachedPty must contain [pid, masterFd]" }
+        this.attachedPty = attachedPty
+    }
     companion object {
         private const val TAG = "PtyTerminalSession"
         const val DEFAULT_COLS = 80
@@ -71,8 +86,9 @@ class PtyTerminalSession(
     fun start(): Boolean {
         if (!started.compareAndSet(false, true)) return true
         return try {
-            val result = linuxRuntime.spawnInteractiveShell(cols, rows)
+            val result = attachedPty ?: linuxRuntime.spawnInteractiveShell(cols, rows)
                 ?: throw IllegalStateException("Unable to create Linux PTY")
+            attachedPty = null
             pid = result[0]
             masterFd = result.getOrNull(1) ?: -1
             if (pid <= 0 || masterFd < 0) {

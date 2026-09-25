@@ -168,7 +168,13 @@ class MainActivity : AppCompatActivity() {
             text = "Retry"
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.parseColor("#1976D2"))
-            setOnClickListener { startRuntime() }
+            setOnClickListener {
+                if (runtimeController.appState.value is AppState.AuthenticationRequired) {
+                    continueAuthentication()
+                } else {
+                    startRuntime()
+                }
+            }
         }
 
         viewLogsButton = Button(this).apply {
@@ -367,6 +373,34 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun continueAuthentication() {
+        lifecycleScope.launch {
+            showStatus("Waiting for Antigravity authentication…", showProgress = true)
+            when (val result = runtimeController.continueAntigravityAuthentication()) {
+                is Result.Success -> showWebView(result.data)
+                is Result.Failure -> {
+                    val ex = result.error
+                    val opId = (ex as? AntigravityStartupException)?.operationId
+                    activeDiagnosticId = opId
+                    if ((ex as? AntigravityStartupException)?.error ==
+                        com.droidantigravity.antigravity.AntigravityStartupError.AUTH_REQUIRED
+                    ) {
+                        showAuthenticationRequired(
+                            ex.message ?: "Authentication is still required.",
+                            opId
+                        )
+                    } else {
+                        showError(
+                            "Antigravity failed to start",
+                            ex.message ?: "Unable to continue Antigravity authentication.",
+                            opId
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private fun showWebView(url: String) {
         runOnUiThread {
             if (!AntigravityWebView.isAntigravityRemoteControlUrl(url)) {
@@ -403,7 +437,20 @@ class MainActivity : AppCompatActivity() {
 
         if (terminalSession == null || !terminalSession!!.isRunning()) {
             terminalSession?.close()
-            terminalSession = PtyTerminalSession(runtimeController.linuxRuntime)
+
+            val authenticationPty =
+                if (runtimeController.appState.value is AppState.AuthenticationRequired) {
+                    runtimeController.takeAntigravityAuthenticationPty()
+                } else {
+                    null
+                }
+
+            terminalSession = if (authenticationPty != null) {
+                PtyTerminalSession(runtimeController.linuxRuntime, authenticationPty)
+            } else {
+                PtyTerminalSession(runtimeController.linuxRuntime)
+            }
+
             val composeView = ComposeView(this).apply {
                 setContent {
                     TerminalScreen(
@@ -482,7 +529,7 @@ class MainActivity : AppCompatActivity() {
             progress.visibility = View.GONE
             statusTitle.text = "Google Sign In Required"
             statusTitle.visibility = View.VISIBLE
-            statusText.text = "$message\n\nComplete authentication using the official Antigravity CLI flow, then tap Retry if necessary."
+            statusText.text = "$message\n\nOpen Terminal to interact with the official Antigravity CLI login prompt. Complete Google authentication there, then tap Retry to continue to Remote Control."
             if (!diagnosticId.isNullOrBlank()) {
                 diagnosticIdText.text = "Diagnostic ID: $diagnosticId"
                 diagnosticIdText.visibility = View.VISIBLE

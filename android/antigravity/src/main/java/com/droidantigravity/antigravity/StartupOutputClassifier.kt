@@ -28,6 +28,8 @@ object StartupOutputClassifier {
                clean.contains("authentication failed", ignoreCase = true) ||
                clean.contains("not authenticated", ignoreCase = true) ||
                clean.contains("unauthenticated", ignoreCase = true) ||
+               clean.contains("you are currently not signed in", ignoreCase = true) ||
+               clean.contains("select login method", ignoreCase = true) ||
                clean.contains("no authentication methods available", ignoreCase = true) ||
                clean.contains("error getting token source", ignoreCase = true)
     }

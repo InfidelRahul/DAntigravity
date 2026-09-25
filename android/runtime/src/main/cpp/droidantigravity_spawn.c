@@ -280,21 +280,40 @@ static jintArray native_spawn_pty_streams_impl(JNIEnv *env, jobjectArray java_ar
         return NULL;
     }
 
-    struct pty_pump_args *pump_args = malloc(sizeof(struct pty_pump_args));
-    if (pump_args) {
-        pump_args->master_fd = master;
-        pump_args->output_path = stdout_path;
-        pthread_t tid;
-        if (pthread_create(&tid, NULL, pty_pump_thread, pump_args) == 0) {
-            pthread_detach(tid);
+    /*
+     * Keep the PTY master owned by the Java caller. The previous implementation
+     * handed the same descriptor to the logging pump, so the pump drained the
+     * interactive stream and then closed the descriptor behind the caller.
+     * That made stdin writes unreliable and broke interactive authentication.
+     *
+     * Duplicate the master only for diagnostics; the original remains a fully
+     * interactive PTY owned by AntigravityManager/PtyTerminalSession.
+     */
+    int log_master = dup(master);
+    if (log_master >= 0) {
+        struct pty_pump_args *pump_args = malloc(sizeof(struct pty_pump_args));
+        if (pump_args) {
+            pump_args->master_fd = log_master;
+            pump_args->output_path = stdout_path;
+            pthread_t tid;
+            if (pthread_create(&tid, NULL, pty_pump_thread, pump_args) == 0) {
+                pthread_detach(tid);
+            } else {
+                LOGE("Failed to create pty_pump_thread: %s", strerror(errno));
+                close(log_master);
+                free(stdout_path);
+                free(pump_args);
+            }
         } else {
-            LOGE("Failed to create pty_pump_thread: %s", strerror(errno));
+            close(log_master);
             free(stdout_path);
-            free(pump_args);
         }
     } else {
+        LOGE("dup(master) failed; interactive PTY remains available but stdout logging is disabled: %s",
+             strerror(errno));
         free(stdout_path);
     }
+
 
     jint values[2] = {pid, master};
     jintArray result = (*env)->NewIntArray(env, 2);

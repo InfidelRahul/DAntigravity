@@ -24,6 +24,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.CircleShape
@@ -45,6 +46,7 @@ fun TerminalScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val focusRequester = remember { FocusRequester() }
     val keys = remember {
         listOf(
             TerminalKey("Esc", PtyTerminalSession.KEY_ESC),
@@ -65,6 +67,10 @@ fun TerminalScreen(
 
     LaunchedEffect(session) {
         session.start()
+        // ConnectBot's terminal owns the IME bridge and hardware-key handling,
+        // but it still needs focus before Android will route text input to it.
+        // Request it after composition so the terminal is immediately usable.
+        focusRequester.requestFocus()
     }
 
     Surface(
@@ -109,10 +115,13 @@ fun TerminalScreen(
                     foregroundColor = Color(0xFFE8E8EA),
                     keyboardEnabled = true,
                     showSoftKeyboard = true,
+                    focusRequester = focusRequester,
                     initialFontSize = 13.sp,
                     minFontSize = 9.sp,
                     maxFontSize = 24.sp,
-                    onTerminalTap = { }
+                    onTerminalTap = {
+                        focusRequester.requestFocus()
+                    }
                 )
             }
 

@@ -251,5 +251,30 @@ class RuntimeController private constructor(private val context: Context) {
         linuxRuntime.executeStreaming(command, onOutput)
     }
 
+    fun takeAntigravityAuthenticationPty(): IntArray? =
+        antigravityManager.takeInteractivePty()
+
+    suspend fun continueAntigravityAuthentication(): Result<String> =
+        mutex.withLock {
+            withContext(Dispatchers.IO) {
+                antigravityManager.continueAfterAuthentication().also { result ->
+                    if (result.isSuccess) {
+                        _appState.value = AppState.Ready(result.getOrThrow(), "Antigravity")
+                    } else {
+                        val error = result.exceptionOrNull()!!
+                        val opId = (error as? com.droidantigravity.antigravity.AntigravityStartupException)?.operationId
+                        _appState.value = if (
+                            (error as? com.droidantigravity.antigravity.AntigravityStartupException)?.error ==
+                            com.droidantigravity.antigravity.AntigravityStartupError.AUTH_REQUIRED
+                        ) {
+                            AppState.AuthenticationRequired(error.message ?: "Authentication is still required.", opId)
+                        } else {
+                            AppState.AntigravityFailed(error.message ?: "Unable to continue Antigravity authentication.", error, opId)
+                        }
+                    }
+                }
+            }
+        }
+
     fun isLinuxRunning(): Boolean = linuxRuntime.state.value.isRunning
 }

@@ -146,7 +146,10 @@ open class PRootRuntime internal constructor(
         val proot = getProotBinary()
         val rootfsPath = paths.rootfsDir.absolutePath
         val shellSelector = "shell=\$(awk -F: '\$1==\"user\"{print \$7; exit}' /etc/passwd); " +
-            "[ -x \"\$shell\" ] || shell=/bin/sh; exec \"\$shell\""
+            "[ -x \"\$shell\" ] || shell=/bin/bash; " +
+            "export SHELL=\"\$shell\" USER=user LOGNAME=user HOME=/home/user; " +
+            "export PS1='\\u@localhost:\\w\\$ '; " +
+            "exec \"\$shell\" -i -l"
 
         return mutableListOf(
             proot.absolutePath,
@@ -217,6 +220,8 @@ open class PRootRuntime internal constructor(
             "GLIBC_TUNABLES=glibc.pthread.rseq=0",
             "HOME=$homeDir",
             "USER=user",
+            "LOGNAME=user",
+            "SHELL=/bin/bash",
             "PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "TERM=xterm-256color",
             "LANG=C.UTF-8",

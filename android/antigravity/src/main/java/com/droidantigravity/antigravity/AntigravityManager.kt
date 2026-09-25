@@ -340,11 +340,19 @@ class AntigravityManager internal constructor(
                 exitCode = e.exitCode
             )
             if (e.error == AntigravityStartupError.AUTH_REQUIRED) {
+                // Keep the interactive CLI/PTy alive. The user must be able to
+                // complete the official authentication flow in the attached
+                // terminal; killing the process here makes authentication
+                // impossible and caused the previous 60s timeout loop.
                 _state.set(AntigravityState.AUTHENTICATION_REQUIRED)
+                monitorJob?.cancel()
+                monitorJob = scope.launch {
+                    monitorProcess(processPid ?: return@launch, combinedLog, opId)
+                }
             } else {
                 _state.set(AntigravityState.FAILED)
+                stopInternal(preserveState = true, operationId = opId)
             }
-            stopInternal(preserveState = true, operationId = opId)
             Result.Failure(e, e.message)
         } catch (e: CancellationException) {
             DiagnosticLogger.i(TAG, "start_cancelled", "Antigravity startup was cancelled", operationId = opId)
@@ -373,6 +381,69 @@ class AntigravityManager internal constructor(
 
     fun currentOpId(): String? = currentOperationId
 
+    /**
+     * Transfers ownership of the current interactive CLI PTY to the Android
+     * terminal UI. The returned array is [pid, masterFd].
+     *
+     * The stdout/stderr diagnostic pump uses a duplicated master descriptor,
+     * so transferring this descriptor does not steal output from the logger.
+     */
+    fun takeInteractivePty(): IntArray? {
+        if (state != AntigravityState.AUTHENTICATION_REQUIRED) return null
+        val pid = processPid ?: return null
+        val fd = stdinFd ?: return null
+        stdinFd = null
+        DiagnosticLogger.i(
+            TAG,
+            "AUTH_PTY_ATTACHED",
+            "Transferred Antigravity authentication PTY to Android terminal",
+            operationId = currentOperationId,
+            processId = pid
+        )
+        return intArrayOf(pid, fd)
+    }
+
+    /**
+     * Continues URL detection after the user has completed authentication in
+     * the official CLI terminal. The existing agy process is reused.
+     */
+    suspend fun continueAfterAuthentication(timeoutMs: Long = 10 * 60 * 1000L): Result<String> =
+        withContext(Dispatchers.IO) {
+            val opId = currentOperationId ?: DiagnosticLogger.createOperationId("AGY_AUTH")
+            val pid = processPid
+            if (pid == null || spawner.waitFor(pid, true, opId) != -2) {
+                // The user may have closed the authentication terminal. Start a
+                // fresh official session; saved credentials, if any, remain
+                // owned by Antigravity.
+                return@withContext start(DEFAULT_STARTUP_TIMEOUT_MS, opId)
+            }
+
+            try {
+                val url = awaitRemoteControlUrl(
+                    paths.antigravityLogFile,
+                    paths.stderrLogFile,
+                    timeoutMs,
+                    opId,
+                    authenticationAlreadyHandled = true
+                )
+                remoteControlUrl = url
+                _state.set(AntigravityState.RUNNING)
+                monitorJob?.cancel()
+                monitorJob = scope.launch { monitorProcess(pid, paths.antigravityLogFile, opId) }
+                Result.Success(url)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: AntigravityStartupException) {
+                _state.set(AntigravityState.FAILED)
+                stopInternal(preserveState = true, operationId = opId)
+                Result.Failure(e, e.message)
+            } catch (e: Throwable) {
+                _state.set(AntigravityState.FAILED)
+                stopInternal(preserveState = true, operationId = opId)
+                Result.Failure(e, e.message)
+            }
+        }
+
     fun stop() {
         stopInternal(preserveState = false, operationId = currentOperationId)
     }
@@ -386,7 +457,8 @@ class AntigravityManager internal constructor(
         log: File,
         stderrLog: File,
         timeoutMs: Long,
-        operationId: String
+        operationId: String,
+        authenticationAlreadyHandled: Boolean = false
     ): String {
         val deadline = System.currentTimeMillis() + timeoutMs
         val startTime = System.currentTimeMillis()
@@ -462,9 +534,17 @@ class AntigravityManager internal constructor(
                 DiagnosticLogger.i(
                     TAG,
                     "AUTHENTICATION_REQUIRED",
-                    "Official CLI reported an authentication state; continuing to wait for its own authentication flow.",
+                    "Official CLI reported an authentication state.",
                     operationId = operationId
                 )
+                if (!authenticationAlreadyHandled) {
+                    throw AntigravityStartupException(
+                        AntigravityStartupError.AUTH_REQUIRED,
+                        "Antigravity requires Google authentication. Open the interactive terminal, complete the official login flow, then press Retry.",
+                        details = DiagnosticSanitizer.redact(text.takeLast(4000)),
+                        operationId = operationId
+                    )
+                }
             }
 
             if (StartupOutputClassifier.isRemoteControlUnavailable(text)) {

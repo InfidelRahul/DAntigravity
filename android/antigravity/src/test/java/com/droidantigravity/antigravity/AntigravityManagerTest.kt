@@ -104,15 +104,34 @@ class AntigravityManagerTest {
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text5))
         assertTrue(StartupOutputClassifier.isAuthenticationRequired(text6))
 
-        // Verify informational sign-in prompts are NOT classified as fatal auth errors
+        // The actual first-launch CLI prompt is an actionable authentication
+        // state, because DAntigravity must expose the still-running PTY to the
+        // user instead of waiting for a URL that cannot exist yet.
         val infoPrompt1 = "Welcome to the Antigravity CLI. You are currently not signed in."
-        val infoPrompt2 = "Sign in to Antigravity"
+        val infoPrompt2 = "Signing in... Select login method:"
         val infoPrompt3 = "[RemoteControl] Staying disconnected: remote-control-setting-enabled Mendel flag is off"
-        assertFalse(StartupOutputClassifier.isAuthenticationRequired(infoPrompt1))
-        assertFalse(StartupOutputClassifier.isAuthenticationRequired(infoPrompt2))
+        assertTrue(StartupOutputClassifier.isAuthenticationRequired(infoPrompt1))
+        assertTrue(StartupOutputClassifier.isAuthenticationRequired(infoPrompt2))
         assertFalse(StartupOutputClassifier.isAuthenticationRequired(infoPrompt3))
 
         assertEquals(AntigravityStartupError.AUTHENTICATION_REQUIRED, StartupOutputClassifier.classifyError(text1, 1))
+    }
+
+    @Test
+    fun test6b_firstLaunchCliPromptIsAuthenticationRequired() {
+        val prompt = """
+            Welcome to the Antigravity CLI. You are currently not signed in.
+
+            Signing in... Select login method:
+            > 1. Google OAuth
+              2. Use a Google Cloud project
+        """.trimIndent()
+
+        assertTrue(StartupOutputClassifier.isAuthenticationRequired(prompt))
+        assertEquals(
+            AntigravityStartupError.AUTH_REQUIRED,
+            StartupOutputClassifier.classifyError(prompt, null)
+        )
     }
 
     @Test
@@ -321,13 +340,15 @@ class AntigravityManagerTest {
         val result = manager.start(startupTimeoutMs = 400)
         val elapsed = System.currentTimeMillis() - startTime
 
-        // Should not abort early; should wait out timeout or until URL is received
+        // Authentication is an actionable state. Startup must return it
+        // immediately while keeping the CLI/PTy alive for user interaction.
         assertTrue(result.isFailure)
         val ex = result.exceptionOrNull()
         assertTrue(ex is AntigravityStartupException)
-        assertEquals(AntigravityStartupError.STARTUP_TIMEOUT, (ex as AntigravityStartupException).error)
-        assertEquals(AntigravityState.FAILED, manager.state)
-        assertTrue("Startup should wait for timeout rather than aborting early, took ${elapsed}ms", elapsed >= 300)
+        assertEquals(AntigravityStartupError.AUTH_REQUIRED, (ex as AntigravityStartupException).error)
+        assertEquals(AntigravityState.AUTHENTICATION_REQUIRED, manager.state)
+        assertEquals(spawner.nextPid, manager.processId())
+        assertTrue("Authentication should be surfaced promptly, took ${elapsed}ms", elapsed < 300)
     }
 
     @Test
