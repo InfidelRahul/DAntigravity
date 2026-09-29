@@ -345,9 +345,14 @@ class AntigravityManager internal constructor(
                 // terminal; killing the process here makes authentication
                 // impossible and caused the previous 60s timeout loop.
                 _state.set(AntigravityState.AUTHENTICATION_REQUIRED)
-                monitorJob?.cancel()
-                monitorJob = scope.launch {
-                    monitorProcess(processPid ?: return@launch, combinedLog, opId)
+                val pid = processPid
+                if (pid != null && spawner.waitFor(pid, true, opId) == -2) {
+                    monitorJob?.cancel()
+                    monitorJob = scope.launch {
+                        monitorProcess(pid, combinedLog, opId)
+                    }
+                } else {
+                    stopInternal(preserveState = true, operationId = opId)
                 }
             } else {
                 _state.set(AntigravityState.FAILED)
@@ -666,13 +671,15 @@ class AntigravityManager internal constructor(
                     stdinFd?.let { spawner.close(it, operationId) }
                     stdinFd = null
                     remoteControlUrl = null
-                    _state.set(
-                        if (isInstalled()) {
-                            AntigravityState.STOPPED
-                        } else {
-                            AntigravityState.NOT_INSTALLED
-                        }
-                    )
+                    if (_state.get() != AntigravityState.AUTHENTICATION_REQUIRED) {
+                        _state.set(
+                            if (isInstalled()) {
+                                AntigravityState.STOPPED
+                            } else {
+                                AntigravityState.NOT_INSTALLED
+                            }
+                        )
+                    }
                     DiagnosticLogger.i(TAG, "process_exited", "Antigravity CLI process exited with status $status", operationId = operationId, processId = pid, exitCode = status)
                 }
                 return

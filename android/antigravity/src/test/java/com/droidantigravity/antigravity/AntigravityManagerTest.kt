@@ -354,13 +354,23 @@ class AntigravityManagerTest {
     @Test
     fun test22_officialAuthFlowProducesUrlSuccessfully() = runBlocking {
         spawner.waitForExitCode = -2
+        spawner.onSpawn = { logPath ->
+            File(logPath).writeText("Authentication required: please sign in with Google to continue.\n")
+        }
+
+        val startResult = manager.start(startupTimeoutMs = 2000)
+        assertTrue(startResult.isFailure)
+        val ex = startResult.exceptionOrNull()
+        assertTrue(ex is AntigravityStartupException)
+        assertEquals(AntigravityStartupError.AUTH_REQUIRED, (ex as AntigravityStartupException).error)
+        assertEquals(AntigravityState.AUTHENTICATION_REQUIRED, manager.state)
+        assertEquals(spawner.nextPid, manager.processId())
+
         val job = async {
-            manager.start(startupTimeoutMs = 2000)
+            manager.continueAfterAuthentication(timeoutMs = 2000)
         }
 
         delay(50)
-        testPaths.antigravityLogFile.writeText("Authentication required: please sign in with Google to continue.\n")
-        delay(100)
         testPaths.antigravityLogFile.appendText("Open https://antigravity.google.com/r/authenticated-session-789 on another device.\n")
 
         val result = job.await()
