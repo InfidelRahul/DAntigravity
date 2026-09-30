@@ -195,7 +195,9 @@ class RuntimeController private constructor(private val context: Context) {
         // Antigravity is launched as the unprivileged Linux user, avoiding that
         // privileged rlimit path. Do not block the entire Linux runtime on the
         // diagnostic probe.
-        linuxSecurityServices.verifySecretService().onFailure { error ->
+        val probeResult = linuxSecurityServices.verifySecretService()
+        if (probeResult is Result.Failure) {
+            val error = probeResult.error
             AvsLogger.w(TAG, "Secret Service probe reported a non-fatal issue; Antigravity will establish its own user D-Bus session: ${error.message}")
             log("[Linux] D-Bus probe warning (non-fatal): ${error.message}")
         }

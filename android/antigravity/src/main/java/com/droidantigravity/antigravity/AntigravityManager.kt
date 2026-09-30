@@ -15,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -282,7 +283,7 @@ class AntigravityManager internal constructor(
         // Keep the command itself in a guest script. This avoids nested shell
         // quoting errors and guarantees that dbus-run-session + gnome-keyring
         // run as uid 1000 instead of PRoot's synthetic uid 0.
-        launcherScript.writeText("#!/bin/bash\nset -e\nexport PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nexport BROWSER='$browserBridge'\nexport XDG_RUNTIME_DIR=/tmp/droidantigravity-runtime-1000\nmkdir -p \"$XDG_RUNTIME_DIR\"\nchmod 700 \"$XDG_RUNTIME_DIR\"\nexec dbus-run-session -- /bin/bash -lc 'eval \"\$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)\"; exec $agyBin --remote-control'\n")
+        launcherScript.writeText("#!/bin/bash\nset -e\nexport PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nexport BROWSER='$browserBridge'\nexport XDG_RUNTIME_DIR=/tmp/droidantigravity-runtime-1000\nmkdir -p \"\$XDG_RUNTIME_DIR\"\nchmod 700 \"\$XDG_RUNTIME_DIR\"\nexec dbus-run-session -- /bin/bash -lc 'eval \"\$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)\"; exec $agyBin --remote-control'\n")
         launcherScript.setExecutable(true, false)
         val guestCommand = "exec su - user -s /bin/bash -c '${launcherScript.absolutePath}'"
         val guestCwd = paths.guestHomePath

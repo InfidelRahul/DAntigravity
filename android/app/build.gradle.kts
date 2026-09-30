@@ -27,9 +27,9 @@ android {
         ?: rootProject.file("release.keystore").takeIf { it.exists() }
         ?: file("release.keystore").takeIf { it.exists() }
 
-    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")
-    val keyAliasValue = System.getenv("KEY_ALIAS")
-    val keyPasswordValue = System.getenv("KEY_PASSWORD")
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() && it != "true" } ?: "droidantigravity123"
+    val keyAliasValue = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() && it != "true" } ?: "droidantigravity"
+    val keyPasswordValue = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() && it != "true" } ?: "droidantigravity123"
     val releaseSigningReady = releaseKeystore?.exists() == true &&
         !keystorePassword.isNullOrBlank() &&
         !keyAliasValue.isNullOrBlank() &&

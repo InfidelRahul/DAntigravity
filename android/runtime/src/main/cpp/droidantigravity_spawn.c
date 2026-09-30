@@ -450,8 +450,12 @@ Java_com_droidantigravity_runtime_NativeSpawn_read(JNIEnv *env, jobject self, ji
 
     ssize_t n;
     do { n = read(fd, bytes, (size_t)len); } while (n < 0 && errno == EINTR);
-    (*env)->ReleaseByteArrayElements(env, java_data, bytes, JNI_ABORT);
-    if (n < 0) return -errno;
+    if (n < 0) {
+        int error = errno;
+        (*env)->ReleaseByteArrayElements(env, java_data, bytes, JNI_ABORT);
+        return -error;
+    }
+    (*env)->ReleaseByteArrayElements(env, java_data, bytes, 0);
     return (jint)n;
 }
 
