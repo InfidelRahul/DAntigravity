@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.Modifier
@@ -67,9 +68,9 @@ fun TerminalScreen(
 
     LaunchedEffect(session) {
         session.start()
-        // ConnectBot's terminal owns the IME bridge and hardware-key handling,
-        // but it still needs focus before Android will route text input to it.
-        // Request it after composition so the terminal is immediately usable.
+        // Let the terminal view finish attachment before requesting IME focus.
+        // This avoids the initial blank/non-input state on Android 15/16.
+        delay(100)
         focusRequester.requestFocus()
     }
 

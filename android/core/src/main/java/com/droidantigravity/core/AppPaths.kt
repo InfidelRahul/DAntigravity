@@ -39,6 +39,9 @@ class AppPaths(
     val hostAntigravityDataDir: File get() = File(rootfsDir, "home/user/.gemini")
 
     val antigravityLogFile: File get() = File(cacheDir, "antigravity.log")
+    val antigravityBrowserUrlFile: File get() = File(rootfsDir, "tmp/droidantigravity-browser-url")
+    val antigravityBrowserBridgeScript: File get() = File(rootfsDir, "home/user/.local/bin/droid-browser-open")
+    val antigravityLauncherScript: File get() = File(rootfsDir, "home/user/.local/bin/droid-antigravity-launch")
     val runtimeLogFile: File get() = File(cacheDir, "linux-runtime.log")
 
     val diagnosticsDir: File get() = File(filesDir, "diagnostics").apply { mkdirs() }

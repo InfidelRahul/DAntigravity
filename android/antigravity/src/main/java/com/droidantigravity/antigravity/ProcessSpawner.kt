@@ -53,6 +53,12 @@ interface ProcessSpawner {
     fun write(fd: Int, data: ByteArray): Int
 
     /**
+     * Reads available PTY bytes. A blocking read is performed by the native
+     * PTY owner coroutine, so there is never a second competing PTY reader.
+     */
+    fun read(fd: Int, buffer: ByteArray): Int = -1
+
+    /**
      * Writes a UTF-8 string to a file descriptor.
      */
     fun writeString(fd: Int, str: String): Boolean {
@@ -127,6 +133,8 @@ class NativeProcessSpawner : ProcessSpawner {
     ): IntArray? = NativeSpawn.spawnInstrumented(argv, envp, cwd, stdoutPath, stderrPath, operationId)
 
     override fun write(fd: Int, data: ByteArray): Int = NativeSpawn.write(fd, data)
+
+    override fun read(fd: Int, buffer: ByteArray): Int = NativeSpawn.read(fd, buffer)
 
     override fun waitFor(pid: Int, noHang: Boolean): Int = NativeSpawn.waitForInstrumented(pid, noHang)
 

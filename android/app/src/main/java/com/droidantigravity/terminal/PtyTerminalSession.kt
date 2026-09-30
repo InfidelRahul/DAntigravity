@@ -5,7 +5,6 @@ import com.droidantigravity.runtime.NativeSpawn
 import com.droidantigravity.runtime.PRootRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -64,13 +63,11 @@ class PtyTerminalSession(
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val inputQueue = Channel<ByteArray>(Channel.UNLIMITED)
     private val started = AtomicBoolean(false)
 
     @Volatile private var pid: Int = -1
     @Volatile private var masterFd: Int = -1
     private var readerJob: Job? = null
-    private var writerJob: Job? = null
 
     /** libvterm-backed terminal emulator. */
     val emulator: TerminalEmulator = TerminalEmulatorFactory.create(
@@ -95,11 +92,6 @@ class PtyTerminalSession(
                 throw IllegalStateException("Linux PTY returned invalid pid/fd")
             }
 
-            writerJob = scope.launch {
-                for (bytes in inputQueue) {
-                    writeNow(bytes)
-                }
-            }
             readerJob = scope.launch {
                 readLoop()
             }
@@ -122,8 +114,9 @@ class PtyTerminalSession(
                         // is thread-safe; never invoke UI callbacks from this IO thread.
                         emulator.writeInput(buffer, 0, count)
                     }
-                    count == 0 -> delay(2)
+                    count == 0 -> delay(2) // poll timeout
                     count == -4 -> continue // EINTR
+                    count == -11 -> delay(2) // EAGAIN
                     else -> break
                 }
             }
@@ -146,8 +139,11 @@ class PtyTerminalSession(
     }
 
     fun write(bytes: ByteArray) {
-        if (bytes.isEmpty()) return
-        inputQueue.trySend(bytes.copyOf())
+        if (bytes.isEmpty() || masterFd < 0) return
+        // Keyboard events are latency-sensitive. Dispatch the write immediately
+        // instead of waiting behind an unbounded coroutine channel. The PTY
+        // master is dedicated to this terminal, so there is no competing reader.
+        scope.launch(Dispatchers.IO) { writeNow(bytes) }
     }
 
     private fun writeNow(bytes: ByteArray) {
@@ -172,10 +168,7 @@ class PtyTerminalSession(
     fun close() {
         if (!started.compareAndSet(true, false)) return
         readerJob?.cancel()
-        writerJob?.cancel()
         readerJob = null
-        writerJob = null
-        inputQueue.close()
 
         val currentPid = pid
         val currentFd = masterFd

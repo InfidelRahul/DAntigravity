@@ -190,9 +190,17 @@ class RuntimeController private constructor(private val context: Context) {
         )
         log("[Linux] Verifying D-Bus and Secret Service support.")
         linuxSecurityServices.ensureInstalled().getOrThrow()
-        linuxSecurityServices.verifySecretService().getOrThrow()
+        // Android/PRoot cannot grant CAP_SYS_RESOURCE. dbus-daemon may therefore
+        // emit a non-fatal fd-limit warning even though the session bus starts.
+        // Antigravity is launched as the unprivileged Linux user, avoiding that
+        // privileged rlimit path. Do not block the entire Linux runtime on the
+        // diagnostic probe.
+        linuxSecurityServices.verifySecretService().onFailure { error ->
+            AvsLogger.w(TAG, "Secret Service probe reported a non-fatal issue; Antigravity will establish its own user D-Bus session: ${error.message}")
+            log("[Linux] D-Bus probe warning (non-fatal): ${error.message}")
+        }
         _appState.value = AppState.LinuxReady
-        log("[Linux] D-Bus and Secret Service are operational.")
+        log("[Linux] D-Bus/Secret Service prerequisites installed; Antigravity will create a user session.")
     }
 
     private suspend fun ensureAntigravity() {

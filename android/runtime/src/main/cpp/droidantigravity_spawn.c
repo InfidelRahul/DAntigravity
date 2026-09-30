@@ -11,7 +11,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
-#include <pthread.h>
+#include <poll.h>
 #include <termios.h>
 
 #if defined(__has_include)
@@ -27,47 +27,6 @@ extern int openpty(int *amaster, int *aslave, char *name, const struct termios *
 #define LOG_TAG "DroidAntigravitySpawn"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-
-struct pty_pump_args {
-    int master_fd;
-    char *output_path;
-};
-
-static void *pty_pump_thread(void *arg) {
-    struct pty_pump_args *args = (struct pty_pump_args *)arg;
-    int master = args->master_fd;
-    const char *out_path = args->output_path;
-
-    int out_fd = open(out_path, O_CREAT | O_WRONLY | O_APPEND, 0600);
-    if (out_fd < 0) {
-        LOGE("pty_pump_thread: failed to open output %s: %s", out_path, strerror(errno));
-        close(master);
-        free(args->output_path);
-        free(args);
-        return NULL;
-    }
-
-    char buffer[4096];
-    ssize_t bytes_read;
-    while ((bytes_read = read(master, buffer, sizeof(buffer))) > 0) {
-        ssize_t written = 0;
-        while (written < bytes_read) {
-            ssize_t w = write(out_fd, buffer + written, (size_t)(bytes_read - written));
-            if (w < 0) {
-                if (errno == EINTR) continue;
-                break;
-            }
-            written += w;
-        }
-        fdatasync(out_fd);
-    }
-
-    close(out_fd);
-    close(master);
-    free(args->output_path);
-    free(args);
-    return NULL;
-}
 
 static void close_pair(int pair[2]) {
     close(pair[0]);
@@ -281,36 +240,12 @@ static jintArray native_spawn_pty_streams_impl(JNIEnv *env, jobjectArray java_ar
     }
 
     /*
-     * Keep the PTY master owned by the Java caller. The previous implementation
-     * handed the same descriptor to the logging pump, so the pump drained the
-     * interactive stream and then closed the descriptor behind the caller.
-     * That made stdin writes unreliable and broke interactive authentication.
-     *
-     * Duplicate the master only for diagnostics; the original remains a fully
-     * interactive PTY owned by AntigravityManager/PtyTerminalSession.
+     * The PTY master is a single byte stream. Do not create a second reader
+     * for diagnostics: dup(master) shares the same open file description and
+     * a reader on it consumes bytes that the interactive owner needs.
+     * Diagnostic capture is performed by the Kotlin PTY owner instead.
      */
-    int log_master = dup(master);
-    if (log_master >= 0) {
-        struct pty_pump_args *pump_args = malloc(sizeof(struct pty_pump_args));
-        if (pump_args) {
-            pump_args->master_fd = log_master;
-            pump_args->output_path = stdout_path;
-            pthread_t tid;
-            if (pthread_create(&tid, NULL, pty_pump_thread, pump_args) == 0) {
-                pthread_detach(tid);
-            } else {
-                LOGE("Failed to create pty_pump_thread: %s", strerror(errno));
-                close(log_master);
-                free(stdout_path);
-                free(pump_args);
-            }
-        } else {
-            close(log_master);
-            free(stdout_path);
-        }
-    } else {
-        LOGE("dup(master) failed; interactive PTY remains available but stdout logging is disabled: %s",
-             strerror(errno));
+    if (stdout_path) {
         free(stdout_path);
     }
 
@@ -493,9 +428,29 @@ Java_com_droidantigravity_runtime_NativeSpawn_read(JNIEnv *env, jobject self, ji
     jsize len = (*env)->GetArrayLength(env, java_data);
     if (len <= 0) return 0;
     jbyte *bytes = (*env)->GetByteArrayElements(env, java_data, NULL);
+    struct pollfd pfd;
+    memset(&pfd, 0, sizeof(pfd));
+    pfd.fd = fd;
+    pfd.events = POLLIN | POLLHUP | POLLERR;
+
+    int ready;
+    do {
+        ready = poll(&pfd, 1, 100);
+    } while (ready < 0 && errno == EINTR);
+
+    if (ready == 0) {
+        (*env)->ReleaseByteArrayElements(env, java_data, bytes, JNI_ABORT);
+        return 0;
+    }
+    if (ready < 0) {
+        int error = errno;
+        (*env)->ReleaseByteArrayElements(env, java_data, bytes, JNI_ABORT);
+        return -error;
+    }
+
     ssize_t n;
     do { n = read(fd, bytes, (size_t)len); } while (n < 0 && errno == EINTR);
-    (*env)->ReleaseByteArrayElements(env, java_data, bytes, 0);
+    (*env)->ReleaseByteArrayElements(env, java_data, bytes, JNI_ABORT);
     if (n < 0) return -errno;
     return (jint)n;
 }

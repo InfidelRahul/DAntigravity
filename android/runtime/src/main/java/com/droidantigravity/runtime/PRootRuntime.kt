@@ -147,9 +147,7 @@ open class PRootRuntime internal constructor(
         val rootfsPath = paths.rootfsDir.absolutePath
         val shellSelector = "shell=\$(awk -F: '\$1==\"user\"{print \$7; exit}' /etc/passwd); " +
             "[ -x \"\$shell\" ] || shell=/bin/bash; " +
-            "export SHELL=\"\$shell\" USER=user LOGNAME=user HOME=/home/user; " +
-            "export PS1='\\u@localhost:\\w\\$ '; " +
-            "exec \"\$shell\" -i -l"
+            "exec su - user -s \"\$shell\" -c 'export TERM=\"\$TERM\"; export COLORTERM=\"truecolor\"; exec \"\$SHELL\" -i -l'"
 
         return mutableListOf(
             proot.absolutePath,

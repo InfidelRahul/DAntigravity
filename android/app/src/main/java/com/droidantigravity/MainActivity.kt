@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.webkit.CookieManager
@@ -33,6 +34,7 @@ import com.droidantigravity.web.AntigravityWebView
 import com.droidantigravity.terminal.PtyTerminalSession
 import com.droidantigravity.terminal.TerminalScreen
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 /**
  * Thin Android shell. The actual Antigravity UI is supplied by Remote Control.
@@ -529,7 +531,7 @@ class MainActivity : AppCompatActivity() {
             progress.visibility = View.GONE
             statusTitle.text = "Google Sign In Required"
             statusTitle.visibility = View.VISIBLE
-            statusText.text = "$message\n\nOpen Terminal to interact with the official Antigravity CLI login prompt. Complete Google authentication there, then tap Retry to continue to Remote Control."
+            statusText.text = "$message\n\nThe official Google OAuth flow is being opened in your Android browser. Complete sign-in there; DroidAntigravity will continue to Remote Control automatically."
             if (!diagnosticId.isNullOrBlank()) {
                 diagnosticIdText.text = "Diagnostic ID: $diagnosticId"
                 diagnosticIdText.visibility = View.VISIBLE
@@ -541,6 +543,33 @@ class MainActivity : AppCompatActivity() {
             viewLogsButton.visibility = View.VISIBLE
             exportLogsButton.visibility = View.VISIBLE
             terminalButton.visibility = if (runtimeController.isLinuxRunning()) View.VISIBLE else View.GONE
+            openAntigravityAuthBrowserWhenReady()
+        }
+    }
+
+    private fun openAntigravityAuthBrowserWhenReady() {
+        lifecycleScope.launch {
+            val paths = com.droidantigravity.core.AppPaths.getInstance(this@MainActivity)
+            val deadline = SystemClock.uptimeMillis() + 30_000L
+            while (SystemClock.uptimeMillis() < deadline && !isFinishing) {
+                val file = paths.antigravityBrowserUrlFile
+                if (file.exists()) {
+                    val url = runCatching { file.readText().trim() }.getOrDefault("")
+                    if (url.startsWith("http://") || url.startsWith("https://")) {
+                        DiagnosticLogger.i(TAG, "AUTH_BROWSER_OPEN", "Opening official CLI OAuth URL in Android browser")
+                        runCatching {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }.onFailure {
+                            DiagnosticLogger.e(TAG, "AUTH_BROWSER_OPEN_FAILED", "Unable to open OAuth URL: ${it.message}", it)
+                        }
+                        file.delete()
+                        // Keep the CLI watcher alive while the user completes OAuth.
+                        continueAuthentication()
+                        return@launch
+                    }
+                }
+                delay(100)
+            }
         }
     }
 

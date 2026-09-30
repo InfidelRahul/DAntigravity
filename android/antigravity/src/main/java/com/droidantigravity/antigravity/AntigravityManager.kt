@@ -4,7 +4,6 @@ import android.content.Context
 import com.droidantigravity.core.AntigravityState
 import com.droidantigravity.core.AppPaths
 import com.droidantigravity.core.Result
-import com.droidantigravity.core.diagnostics.DiagnosticEvent
 import com.droidantigravity.core.diagnostics.DiagnosticLogger
 import com.droidantigravity.core.diagnostics.DiagnosticSanitizer
 import com.droidantigravity.core.runCatchingResult
@@ -19,7 +18,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.RandomAccessFile
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -59,6 +58,8 @@ class AntigravityManager internal constructor(
     @Volatile private var processLog: File? = null
     @Volatile private var currentOperationId: String? = null
     private var monitorJob: Job? = null
+    private var ptyReaderJob: Job? = null
+    private val browserOpened = AtomicBoolean(false)
 
     val state: AntigravityState get() = _state.get()
 
@@ -248,13 +249,42 @@ class AntigravityManager internal constructor(
 
         // 4. CLI environment diagnostics
         val agyBin = if (paths.hostAntigravityBin.exists()) paths.guestAntigravityBin else "agy"
-        // Keep D-Bus + Secret Service in the same session as agy. This avoids
-        // the common headless-keyring failure where agy inherits no session bus.
-        // The official headless daemon is intentionally not forced here because
-        // it requires a Linux systemd user service, which a PRoot userspace does
-        // not provide. The documented interactive --remote-control mode is the
-        // reliable fallback and remains tied to this supervised CLI process.
-        val guestCommand = "exec dbus-run-session -- sh -lc 'eval \"\$(gnome-keyring-daemon --start --components=secrets)\"; exec $agyBin --remote-control'"
+        // Run the CLI as the persistent Linux user, not PRoot's synthetic root.
+        // This is important for Secret Service: dbus-daemon otherwise sees uid 0
+        // and attempts the privileged 65536-fd rlimit path, which Android/PRoot
+        // cannot satisfy (CAP_SYS_RESOURCE is unavailable).
+        //
+        // The browser bridge is intentionally tiny: when the official CLI asks
+        // its local browser launcher to open OAuth, the bridge records the URL
+        // inside the persistent guest rootfs. Android observes that file and
+        // opens the URL with ACTION_VIEW. No credentials or tokens are stored
+        // by DroidAntigravity.
+        val browserBridge = paths.antigravityBrowserBridgeScript.absolutePath
+        val browserUrlFile = paths.antigravityBrowserUrlFile.absolutePath
+        val launcherScript = paths.antigravityLauncherScript
+        paths.antigravityBrowserBridgeScript.parentFile?.mkdirs()
+        paths.antigravityBrowserUrlFile.parentFile?.mkdirs()
+        paths.antigravityBrowserUrlFile.delete()
+
+        // Linux-side browser bridge: the official CLI still owns the OAuth
+        // flow. This helper only hands its generated authorization URL to the
+        // Android host; it never stores credentials/tokens.
+        val xdgOpen = paths.antigravityBrowserBridgeScript.parentFile!!.resolve("xdg-open")
+        val sensibleBrowser = paths.antigravityBrowserBridgeScript.parentFile!!.resolve("sensible-browser")
+        val browserBridgeScript = "#!/bin/sh\nprintf '%s' \"\$1\" > '$browserUrlFile.tmp'\nmv -f '$browserUrlFile.tmp' '$browserUrlFile'\nexit 0\n"
+        paths.antigravityBrowserBridgeScript.writeText(browserBridgeScript)
+        xdgOpen.writeText(browserBridgeScript)
+        sensibleBrowser.writeText(browserBridgeScript)
+        paths.antigravityBrowserBridgeScript.setExecutable(true, false)
+        xdgOpen.setExecutable(true, false)
+        sensibleBrowser.setExecutable(true, false)
+
+        // Keep the command itself in a guest script. This avoids nested shell
+        // quoting errors and guarantees that dbus-run-session + gnome-keyring
+        // run as uid 1000 instead of PRoot's synthetic uid 0.
+        launcherScript.writeText("#!/bin/bash\nset -e\nexport PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nexport BROWSER='$browserBridge'\nexport XDG_RUNTIME_DIR=/tmp/droidantigravity-runtime-1000\nmkdir -p \"$XDG_RUNTIME_DIR\"\nchmod 700 \"$XDG_RUNTIME_DIR\"\nexec dbus-run-session -- /bin/bash -lc 'eval \"\$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)\"; exec $agyBin --remote-control'\n")
+        launcherScript.setExecutable(true, false)
+        val guestCommand = "exec su - user -s /bin/bash -c '${launcherScript.absolutePath}'"
         val guestCwd = paths.guestHomePath
         val guestPath = "/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
@@ -307,6 +337,11 @@ class AntigravityManager internal constructor(
                 operationId = opId,
                 processId = pid
             )
+
+            // The PTY has exactly one reader. Capture its bytes here rather than
+            // in native code so interactive input/output cannot be stolen by a
+            // second diagnostic pump.
+            startPtyReader(spawned.getOrNull(1) ?: -1, combinedLog, stderrLog, opId)
 
             // 6. Polling & liveness loop
             val url = awaitRemoteControlUrl(combinedLog, stderrLog, startupTimeoutMs, opId)
@@ -398,6 +433,7 @@ class AntigravityManager internal constructor(
         val pid = processPid ?: return null
         val fd = stdinFd ?: return null
         stdinFd = null
+        stopPtyReader()
         DiagnosticLogger.i(
             TAG,
             "AUTH_PTY_ATTACHED",
@@ -543,9 +579,21 @@ class AntigravityManager internal constructor(
                     operationId = operationId
                 )
                 if (!authenticationAlreadyHandled) {
+                    // The official CLI's local flow is documented to launch the
+                    // default browser when no saved session exists. In Android/
+                    // PRoot there is no Linux desktop browser, so first select
+                    // Google's OAuth method and let the browser bridge hand the
+                    // generated URL to Android. Keep the CLI alive while OAuth
+                    // completes; do not start a 60s fatal watchdog here.
+                    val fd = stdinFd
+                    if (fd != null && browserOpened.compareAndSet(false, true)) {
+                        DiagnosticLogger.i(TAG, "AUTH_GOOGLE_SELECTED", "Selecting Google OAuth in official CLI", operationId = operationId)
+                        spawner.writeString(fd, "\r")
+                    }
+                    _state.set(AntigravityState.AUTHENTICATION_REQUIRED)
                     throw AntigravityStartupException(
                         AntigravityStartupError.AUTH_REQUIRED,
-                        "Antigravity requires Google authentication. Open the interactive terminal, complete the official login flow, then press Retry.",
+                        "Google sign-in has been opened in the Android browser. Complete authentication there; DroidAntigravity will continue automatically.",
                         details = DiagnosticSanitizer.redact(text.takeLast(4000)),
                         operationId = operationId
                     )
@@ -661,6 +709,44 @@ class AntigravityManager internal constructor(
         )
     }
 
+    private fun startPtyReader(fd: Int, stdout: File, stderr: File, operationId: String) {
+        if (fd < 0) return
+        ptyReaderJob?.cancel()
+        ptyReaderJob = scope.launch(Dispatchers.IO) {
+            val buffer = ByteArray(32 * 1024)
+            try {
+                while (currentCoroutineContext().isActive && processPid != null) {
+                    val count = spawner.read(fd, buffer)
+                    if (count > 0) {
+                        val text = String(buffer, 0, count, Charsets.UTF_8)
+                        stdout.parentFile?.mkdirs()
+                        stdout.appendText(text)
+                        // stderr shares the PTY for interactive CLI mode. Keep
+                        // stderr file useful by recording only explicit diagnostic
+                        // stream data there when the process later exits.
+                    } else if (count == -4) {
+                        continue
+                    } else if (count == -11) {
+                        delay(5)
+                    } else if (count < 0) {
+                        break
+                    } else {
+                        delay(5)
+                    }
+                }
+            } catch (_: CancellationException) {
+                // Ownership may be transferred to the Android terminal.
+            } catch (t: Throwable) {
+                DiagnosticLogger.w(TAG, "pty_reader_stopped", "PTY reader stopped: ${t.message}", operationId = operationId)
+            }
+        }
+    }
+
+    private fun stopPtyReader() {
+        ptyReaderJob?.cancel()
+        ptyReaderJob = null
+    }
+
     internal suspend fun monitorProcess(pid: Int, log: File, operationId: String?) {
         DiagnosticLogger.d(TAG, "monitor_started", "Background process monitor started for PID $pid", operationId = operationId, processId = pid)
         while (currentCoroutineContext()[Job]?.isActive == true) {
@@ -689,6 +775,7 @@ class AntigravityManager internal constructor(
     }
 
     internal fun stopInternal(preserveState: Boolean = false, operationId: String? = null) {
+        stopPtyReader()
         monitorJob?.cancel()
         monitorJob = null
 
