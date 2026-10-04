@@ -31,7 +31,24 @@ object StartupOutputClassifier {
                clean.contains("you are currently not signed in", ignoreCase = true) ||
                clean.contains("select login method", ignoreCase = true) ||
                clean.contains("no authentication methods available", ignoreCase = true) ||
-               clean.contains("error getting token source", ignoreCase = true)
+               clean.contains("error getting token source", ignoreCase = true) ||
+               isWaitingForAuthCode(clean)
+    }
+
+    /**
+     * Checks if the output indicates the CLI is waiting for the user to paste or enter the authorization code.
+     */
+    fun isWaitingForAuthCode(text: String): Boolean {
+        val clean = RemoteControlUrlParser.stripAnsi(text)
+        return clean.contains("enter authorization code", ignoreCase = true) ||
+               clean.contains("enter code", ignoreCase = true) ||
+               clean.contains("authorization code:", ignoreCase = true) ||
+               clean.contains("paste authorization code", ignoreCase = true) ||
+               clean.contains("paste code", ignoreCase = true) ||
+               clean.contains("enter verification code", ignoreCase = true) ||
+               clean.contains("verification code:", ignoreCase = true) ||
+               clean.contains("enter the code", ignoreCase = true) ||
+               clean.contains("enter your authorization code", ignoreCase = true)
     }
 
     /**

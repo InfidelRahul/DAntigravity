@@ -91,7 +91,10 @@ sealed class AppState {
     data class StartingAntigravityServer(val status: String) : AppState()
     data class Ready(val url: String, val title: String = "DroidAntigravity") : AppState()
     object Stopping : AppState()
-    data class AuthenticationRequired(val message: String, val operationId: String? = null) : AppState()
+    data class AuthenticationRequired(val authUrl: String? = null, val message: String, val operationId: String? = null) : AppState() {
+        constructor(message: String, operationId: String? = null) : this(null, message, operationId)
+    }
+    data class Authenticating(val message: String = "Completing Antigravity authentication…", val operationId: String? = null) : AppState()
 
     // Specific stage failures
     data class RootfsFailed(val message: String, val throwable: Throwable? = null, val operationId: String? = null) : AppState()

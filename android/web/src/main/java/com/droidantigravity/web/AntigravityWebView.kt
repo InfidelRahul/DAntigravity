@@ -39,8 +39,9 @@ class AntigravityWebView(private val context: Context) {
         fun isAntigravityRemoteControlUrl(url: String): Boolean =
             runCatching {
                 val uri = url.toUri()
+                val host = uri.host.orEmpty()
                 uri.scheme.equals("https", true) &&
-                    uri.host.equals("antigravity.google.com", true) &&
+                    (host.equals("antigravity.google.com", true) || host.equals("antigravity.google", true) || host.endsWith(".antigravity.google", true)) &&
                     uri.path.orEmpty().startsWith("/r/")
             }.getOrDefault(false)
 

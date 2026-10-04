@@ -56,6 +56,7 @@ class AntigravityManager internal constructor(
     @Volatile private var processPid: Int? = null
     @Volatile private var stdinFd: Int? = null
     @Volatile private var remoteControlUrl: String? = null
+    @Volatile private var currentAuthUrl: String? = null
     @Volatile private var processLog: File? = null
     @Volatile private var currentOperationId: String? = null
     private var monitorJob: Job? = null
@@ -229,6 +230,8 @@ class AntigravityManager internal constructor(
 
         _state.set(AntigravityState.STARTING)
         remoteControlUrl = null
+        currentAuthUrl = null
+        browserOpened.set(false)
 
         // 2. Keep Antigravity-owned credentials and configuration untouched.
         // The official CLI owns authentication, session persistence, onboarding and logout.
@@ -282,7 +285,7 @@ class AntigravityManager internal constructor(
 
         // Keep the command itself in a guest script. This avoids nested shell
         // quoting errors and guarantees clean environment isolation.
-        launcherScript.writeText("#!/bin/bash\nset -e\nexport HOME=/home/user\nexport USER=user\nexport LOGNAME=user\nexport PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nexport BROWSER='$browserBridge'\nexport XDG_RUNTIME_DIR=/tmp/droidantigravity-runtime-1000\nmkdir -p \"\$XDG_RUNTIME_DIR\"\nchmod 700 \"\$XDG_RUNTIME_DIR\"\nexec dbus-run-session -- /bin/bash -lc 'eval \"\$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)\"; exec $agyBin --remote-control'\n")
+        launcherScript.writeText("#!/bin/bash\nset -e\nexport HOME=/home/user\nexport USER=user\nexport LOGNAME=user\nexport PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nexport BROWSER='$browserBridge'\nexport XDG_RUNTIME_DIR=/tmp/droidantigravity-runtime-1000\nmkdir -p \"\$XDG_RUNTIME_DIR\"\nchmod 700 \"\$XDG_RUNTIME_DIR\"\nexec dbus-run-session -- /bin/bash -lc 'eval \"\$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)\"; exec $agyBin --remote-control --dangerously-skip-permissions'\n")
         launcherScript.setExecutable(true, false)
         val guestCommand = "exec /bin/bash '${launcherScript.absolutePath}'"
         val guestCwd = paths.guestHomePath
@@ -417,45 +420,131 @@ class AntigravityManager internal constructor(
 
     fun currentRemoteControlUrl(): String? = remoteControlUrl
 
+    fun currentAuthUrl(): String? = currentAuthUrl
+
     fun processId(): Int? = processPid
 
     fun currentOpId(): String? = currentOperationId
 
     /**
-     * Transfers ownership of the current interactive CLI PTY to the Android
-     * terminal UI. The returned array is [pid, masterFd].
-     *
-     * The stdout/stderr diagnostic pump uses a duplicated master descriptor,
-     * so transferring this descriptor does not steal output from the logger.
+     * Sends arbitrary string input to the running CLI process's stdin.
      */
-    fun takeInteractivePty(): IntArray? {
-        if (state != AntigravityState.AUTHENTICATION_REQUIRED) return null
-        val pid = processPid ?: return null
-        val fd = stdinFd ?: return null
-        stdinFd = null
-        stopPtyReader()
-        DiagnosticLogger.i(
-            TAG,
-            "AUTH_PTY_ATTACHED",
-            "Transferred Antigravity authentication PTY to Android terminal",
-            operationId = currentOperationId,
-            processId = pid
-        )
-        return intArrayOf(pid, fd)
+    fun sendInput(input: String): Boolean {
+        val fd = stdinFd ?: return false
+        val pid = processPid ?: return false
+        if (spawner.waitFor(pid, true, currentOperationId) != -2) return false
+        return spawner.writeString(fd, input)
     }
 
     /**
-     * Continues URL detection after the user has completed authentication in
-     * the official CLI terminal. The existing agy process is reused.
+     * Submits the user's authorization code to the STILL-RUNNING agy process stdin,
+     * then awaits the final Remote Control URL.
+     */
+    suspend fun submitAuthorizationCode(
+        code: String,
+        timeoutMs: Long = DEFAULT_STARTUP_TIMEOUT_MS
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val opId = currentOperationId ?: DiagnosticLogger.createOperationId("AGY_AUTH_CODE")
+        DiagnosticLogger.i(TAG, "AUTH_CODE_SUBMISSION_START", "Submitting authorization code to running agy process", operationId = opId)
+
+        val pid = processPid
+        val fd = stdinFd
+        if (pid == null || fd == null || fd < 0) {
+            val err = AntigravityStartupException(
+                AntigravityStartupError.START_FAILED,
+                "Antigravity CLI process is not running. Please restart Antigravity.",
+                operationId = opId
+            )
+            _state.set(AntigravityState.FAILED)
+            return@withContext Result.Failure(err, err.message)
+        }
+
+        val status = spawner.waitFor(pid, true, opId)
+        if (status != -2) {
+            val err = AntigravityStartupException(
+                AntigravityStartupError.PROCESS_EXITED,
+                "Antigravity CLI process exited with status $status before code submission.",
+                exitCode = status,
+                operationId = opId
+            )
+            _state.set(AntigravityState.FAILED)
+            return@withContext Result.Failure(err, err.message)
+        }
+
+        val cleanCode = code.trim()
+        require(cleanCode.isNotEmpty()) { "Authorization code cannot be empty" }
+
+        DiagnosticLogger.i(
+            TAG,
+            "AUTH_CODE_SUBMITTED",
+            "Writing authorization code to CLI stdin (length=${cleanCode.length})",
+            operationId = opId,
+            processId = pid
+        )
+
+        // Write authorization code followed by newline to the existing process PTY stdin
+        val written = spawner.writeString(fd, "$cleanCode\n")
+        if (!written) {
+            val err = AntigravityStartupException(
+                AntigravityStartupError.FAILED,
+                "Failed to write authorization code to Antigravity CLI stdin",
+                operationId = opId
+            )
+            return@withContext Result.Failure(err, err.message)
+        }
+
+        _state.set(AntigravityState.STARTING)
+
+        try {
+            val url = awaitRemoteControlUrl(
+                paths.antigravityLogFile,
+                paths.stderrLogFile,
+                timeoutMs,
+                opId,
+                authenticationAlreadyHandled = true
+            )
+            remoteControlUrl = url
+            _state.set(AntigravityState.RUNNING)
+            DiagnosticLogger.i(
+                TAG,
+                "REMOTE_CONTROL_READY",
+                "Remote Control URL established after authentication: ${DiagnosticSanitizer.redactRemoteControlUrl(url)}",
+                operationId = opId,
+                processId = pid
+            )
+            Result.Success(url)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: AntigravityStartupException) {
+            DiagnosticLogger.e(TAG, "auth_code_verification_failed", "Authentication failed: [${e.error}] ${e.message}", e, operationId = opId)
+            if (e.error == AntigravityStartupError.AUTH_REQUIRED) {
+                _state.set(AntigravityState.AUTHENTICATION_REQUIRED)
+            } else {
+                _state.set(AntigravityState.FAILED)
+            }
+            Result.Failure(e, e.message)
+        } catch (e: Throwable) {
+            DiagnosticLogger.e(TAG, "auth_code_error", "Unexpected error during auth completion: ${e.message}", e, operationId = opId)
+            _state.set(AntigravityState.FAILED)
+            Result.Failure(e, e.message)
+        }
+    }
+
+    @Deprecated("Antigravity process is dedicated to Remote Control; interactive shell runs independently")
+    fun takeInteractivePty(): IntArray? {
+        DiagnosticLogger.w(TAG, "takeInteractivePty_deprecated", "takeInteractivePty called but Antigravity CLI process is preserved for Remote Control")
+        return null
+    }
+
+    /**
+     * Continues URL detection after the user has completed authentication.
+     * The existing agy process is reused.
      */
     suspend fun continueAfterAuthentication(timeoutMs: Long = 10 * 60 * 1000L): Result<String> =
         withContext(Dispatchers.IO) {
             val opId = currentOperationId ?: DiagnosticLogger.createOperationId("AGY_AUTH")
             val pid = processPid
             if (pid == null || spawner.waitFor(pid, true, opId) != -2) {
-                // The user may have closed the authentication terminal. Start a
-                // fresh official session; saved credentials, if any, remain
-                // owned by Antigravity.
                 return@withContext start(DEFAULT_STARTUP_TIMEOUT_MS, opId)
             }
 
@@ -487,6 +576,19 @@ class AntigravityManager internal constructor(
 
     fun stop() {
         stopInternal(preserveState = false, operationId = currentOperationId)
+    }
+
+    private fun readBrowserBridgeUrl(): String? {
+        val file = paths.antigravityBrowserUrlFile
+        if (!file.exists()) return null
+        return try {
+            val content = file.readText().trim()
+            if (content.startsWith("http://") || content.startsWith("https://")) {
+                content
+            } else null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     internal suspend fun awaitRemoteControlUrl(
@@ -541,12 +643,12 @@ class AntigravityManager internal constructor(
                 lastStderrSize = currentStderrSize
             }
 
-            // 1. Check for valid Remote Control URL
-            if (text.contains("https://antigravity.google.com/r/")) {
+            // 1. Check for valid Remote Control URL in stdout or stderr
+            if (text.contains("/r/")) {
                 DiagnosticLogger.d(TAG, "REMOTE_CONTROL_URL_CANDIDATE", "Candidate Remote Control URL detected in stdout", operationId = operationId)
             }
 
-            val url = RemoteControlUrlParser.parseUrl(text)
+            val url = RemoteControlUrlParser.parseUrl(text) ?: RemoteControlUrlParser.parseUrl(stderrText)
             if (url != null) {
                 remoteControlUrl = url
                 DiagnosticLogger.i(
@@ -567,35 +669,65 @@ class AntigravityManager internal constructor(
                 }
             }
 
-            // 3. Authentication is owned by the official CLI. Do not abort merely
-            // because it reports an authentication state while its browser flow may
-            // still be active. A process exit is classified below.
-            if (!authNoticeLogged && StartupOutputClassifier.isAuthenticationRequired(text)) {
+            // 3. Continuously detect candidate authentication URL
+            val detectedAuthUrl = AuthenticationUrlParser.extractAuthUrl(text)
+                ?: AuthenticationUrlParser.extractAuthUrl(stderrText)
+                ?: readBrowserBridgeUrl()
+
+            if (detectedAuthUrl != null && currentAuthUrl == null) {
+                currentAuthUrl = detectedAuthUrl
+                DiagnosticLogger.i(
+                    TAG,
+                    "AUTH_URL_AVAILABLE",
+                    "Authentication URL detected: ${DiagnosticSanitizer.redact(detectedAuthUrl)}",
+                    operationId = operationId
+                )
+            }
+
+            // 4. Handle login method selection if prompted (e.g. "Select login method: 1. Google OAuth")
+            if (text.contains("select login method", ignoreCase = true) || text.contains("1. google oauth", ignoreCase = true)) {
+                val fd = stdinFd
+                if (fd != null && browserOpened.compareAndSet(false, true)) {
+                    DiagnosticLogger.i(TAG, "AUTH_GOOGLE_SELECTED", "Selecting Google OAuth in official CLI", operationId = operationId)
+                    spawner.writeString(fd, "\r")
+                }
+            }
+
+            // 5. Authentication required check
+            if (!authNoticeLogged && (StartupOutputClassifier.isAuthenticationRequired(text) || currentAuthUrl != null || StartupOutputClassifier.isWaitingForAuthCode(text))) {
                 authNoticeLogged = true
                 DiagnosticLogger.i(
                     TAG,
                     "AUTHENTICATION_REQUIRED",
-                    "Official CLI reported an authentication state.",
+                    "Official CLI reported an authentication state. Waiting for authorization code.",
                     operationId = operationId
                 )
                 if (!authenticationAlreadyHandled) {
-                    // The official CLI's local flow is documented to launch the
-                    // default browser when no saved session exists. In Android/
-                    // PRoot there is no Linux desktop browser, so first select
-                    // Google's OAuth method and let the browser bridge hand the
-                    // generated URL to Android. Keep the CLI alive while OAuth
-                    // completes; do not start a 60s fatal watchdog here.
-                    val fd = stdinFd
-                    if (fd != null && browserOpened.compareAndSet(false, true)) {
-                        DiagnosticLogger.i(TAG, "AUTH_GOOGLE_SELECTED", "Selecting Google OAuth in official CLI", operationId = operationId)
-                        spawner.writeString(fd, "\r")
+                    // If auth URL has not been detected yet, give a brief 3s window to capture it
+                    var authUrl = currentAuthUrl
+                    if (authUrl == null) {
+                        val waitDeadline = System.currentTimeMillis() + 3000L
+                        while (System.currentTimeMillis() < waitDeadline && authUrl == null) {
+                            val curText = if (log.exists()) runCatching { log.readText() }.getOrDefault("") else ""
+                            val curStderr = if (stderrLog.exists()) runCatching { stderrLog.readText() }.getOrDefault("") else ""
+                            authUrl = AuthenticationUrlParser.extractAuthUrl(curText)
+                                ?: AuthenticationUrlParser.extractAuthUrl(curStderr)
+                                ?: readBrowserBridgeUrl()
+                            if (authUrl != null) {
+                                currentAuthUrl = authUrl
+                                break
+                            }
+                            delay(100)
+                        }
                     }
+
                     _state.set(AntigravityState.AUTHENTICATION_REQUIRED)
                     throw AntigravityStartupException(
-                        AntigravityStartupError.AUTH_REQUIRED,
-                        "Google sign-in has been opened in the Android browser. Complete authentication there; DroidAntigravity will continue automatically.",
+                        error = AntigravityStartupError.AUTH_REQUIRED,
+                        message = "Authorization required. Complete authentication in your browser. Then paste the authorization code here.",
                         details = DiagnosticSanitizer.redact(text.takeLast(4000)),
-                        operationId = operationId
+                        operationId = operationId,
+                        authUrl = currentAuthUrl
                     )
                 }
             }

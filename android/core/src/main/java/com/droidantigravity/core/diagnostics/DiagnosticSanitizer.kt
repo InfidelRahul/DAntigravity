@@ -17,7 +17,7 @@ object DiagnosticSanitizer {
         """(?i)\b(cookie:\s*)([^\s\r\n;]+(?:;\s*[^\s\r\n;]+)*)"""
     )
     private val KEY_VALUE_SECRET_PATTERN = Regex(
-        """(?i)\b(bearer|access_token|refresh_token|id_token|api[_-]?key|apikey|client_secret|client[_-]?id|password|passwd|pwd|secret|session(?:[_-]?token)?|auth(?:[_-]?token)?)\s*([:=])\s*([^\s,;&"']+)"""
+        """(?i)\b(bearer|access_token|refresh_token|id_token|api[_-]?key|apikey|client_secret|client[_-]?id|password|passwd|pwd|secret|session(?:[_-]?token)?|auth(?:[_-]?token)?|auth[_-]?code|code)\s*([:=])\s*([^\s,;&"']+)"""
     )
     private val GOOGLE_OAUTH_PATTERN = Regex(
         """ya29\.[A-Za-z0-9\-_]+"""
@@ -29,7 +29,7 @@ object DiagnosticSanitizer {
         """-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"""
     )
     private val SENSITIVE_URL_PARAM_PATTERN = Regex(
-        """(?i)([?&](?:access_token|token|api[_-]?key|secret|password|client_secret)=)[^&\s]+"""
+        """(?i)([?&](?:access_token|token|api[_-]?key|secret|password|client_secret|code)=)[^&\s]+"""
     )
     private val REMOTE_CONTROL_URL_PATTERN = Regex(
         """https://antigravity\.google\.com/r/[a-zA-Z0-9_\-\.\~%!$&'()*+,;=:@/?]*"""

@@ -399,6 +399,92 @@ class AntigravityManagerTest {
         assertNotNull(parsedUrl)
         assertEquals("https://antigravity.google.com/r/e61732b3-ef5d-4dfc-87b9-dfe262a4ef67-v2", parsedUrl)
     }
+
+    @Test
+    fun test24_launcherScriptIncludesDangerouslySkipPermissions() = runBlocking {
+        spawner.waitForExitCode = -2
+        spawner.onSpawn = { logPath ->
+            File(logPath).writeText("Open https://antigravity.google.com/r/skip-perm-123 on another device.\n")
+        }
+
+        val result = manager.start(startupTimeoutMs = 1000)
+        assertTrue(result.isSuccess)
+        val launcherContent = testPaths.antigravityLauncherScript.readText()
+        assertTrue(
+            "Launcher script must include --dangerously-skip-permissions flag",
+            launcherContent.contains("--dangerously-skip-permissions")
+        )
+    }
+
+    @Test
+    fun test25_authenticationUrlParserExtractsAndValidatesUrl() {
+        val googleOAuth = "Please visit: https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=xyz.apps.googleusercontent.com&redirect_uri=urn%3Aietf%3Awg%3Aoauth%3A2.0%3Aoob to authorize"
+        val detected = AuthenticationUrlParser.extractAuthUrl(googleOAuth)
+        assertNotNull(detected)
+        assertTrue(detected!!.startsWith("https://accounts.google.com/o/oauth2/auth"))
+        assertTrue(AuthenticationUrlParser.isAuthenticationUrl(detected))
+
+        val rcUrl = "https://antigravity.google.com/r/session-123"
+        assertFalse(
+            "Remote control session URL must not be classified as authentication URL",
+            AuthenticationUrlParser.isAuthenticationUrl(rcUrl)
+        )
+    }
+
+    @Test
+    fun test26_submitAuthorizationCodeWritesToSameProcessStdin() = runBlocking {
+        spawner.waitForExitCode = -2
+        spawner.onSpawn = { logPath ->
+            File(logPath).writeText("Welcome to the Antigravity CLI. You are currently not signed in.\nVisit: https://accounts.google.com/o/oauth2/auth?client_id=123 to authenticate.\nEnter authorization code: ")
+        }
+
+        val startResult = manager.start(startupTimeoutMs = 2000)
+        assertTrue(startResult.isFailure)
+        val ex = startResult.exceptionOrNull() as AntigravityStartupException
+        assertEquals(AntigravityStartupError.AUTH_REQUIRED, ex.error)
+        assertEquals(AntigravityState.AUTHENTICATION_REQUIRED, manager.state)
+        val pid = manager.processId()
+        assertEquals(spawner.nextPid, pid)
+
+        // Ensure auth URL was detected
+        assertNotNull(manager.currentAuthUrl())
+        assertTrue(manager.currentAuthUrl()!!.contains("accounts.google.com"))
+
+        // Now submit authorization code to the STILL-RUNNING process
+        val codeJob = async {
+            manager.submitAuthorizationCode("4/0AY0e-sample-auth-code-123", timeoutMs = 2000)
+        }
+
+        delay(50)
+        testPaths.antigravityLogFile.appendText("\nRemote control active: https://antigravity.google.com/r/auth-success-456\n")
+
+        val codeResult = codeJob.await()
+        assertTrue(codeResult.isSuccess)
+        assertEquals("https://antigravity.google.com/r/auth-success-456", codeResult.getOrNull())
+        assertEquals(AntigravityState.RUNNING, manager.state)
+
+        // Verify the code was written to stdin
+        assertTrue(
+            "Authorization code must be sent to process stdin",
+            spawner.writtenStrings.any { it.contains("4/0AY0e-sample-auth-code-123\n") }
+        )
+        // Verify process was NOT killed or restarted
+        assertEquals(pid, manager.processId())
+        assertEquals(0, spawner.killedPids.size)
+    }
+
+    @Test
+    fun test27_sendInputWritesDirectlyToStdin() = runBlocking {
+        spawner.waitForExitCode = -2
+        spawner.onSpawn = { logPath ->
+            File(logPath).writeText("Open https://antigravity.google.com/r/input-test on another device.\n")
+        }
+
+        manager.start(startupTimeoutMs = 1000)
+        val written = manager.sendInput("test input\n")
+        assertTrue(written)
+        assertTrue(spawner.writtenStrings.contains("test input\n"))
+    }
 }
 
 class FakeProcessSpawner : ProcessSpawner {

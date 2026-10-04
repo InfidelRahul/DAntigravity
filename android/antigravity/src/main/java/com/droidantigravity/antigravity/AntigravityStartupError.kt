@@ -40,9 +40,10 @@ class AntigravityStartupException(
     val stderr: String? = null,
     val reason: String? = null,
     val operationId: String? = null,
+    val authUrl: String? = null,
     cause: Throwable? = null
 ) : IllegalStateException(message, cause) {
     override fun toString(): String {
-        return "AntigravityStartupException(error=$error, operationId=$operationId, exitCode=$exitCode, message=$message, reason=$reason, details=${details?.take(200)})"
+        return "AntigravityStartupException(error=$error, operationId=$operationId, exitCode=$exitCode, authUrl=$authUrl, message=$message, reason=$reason, details=${details?.take(200)})"
     }
 }

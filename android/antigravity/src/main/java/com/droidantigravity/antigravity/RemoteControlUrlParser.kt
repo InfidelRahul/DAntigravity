@@ -9,10 +9,10 @@ object RemoteControlUrlParser {
     // Matches ANSI escape sequences (CSI sequences, OSC sequences, cursor movement, color codes)
     private val ANSI_PATTERN = Regex("""\u001B\[[0-?]*[ -/]*[@-~]|\u001B\].*?(\u0007|\u001B\\)""")
 
-    // Matches official Remote Control URL shape: https://antigravity.google.com/r/...
+    // Matches official Remote Control URL shape: https://antigravity.google.com/r/... or https://antigravity.google/r/...
     // Stops before whitespace, control chars, or common outer delimiters like < > " '
     private val REMOTE_URL_PATTERN = Regex(
-        """https://antigravity\.google\.com/r/[^\s<>"'\u0000-\u001F]+""",
+        """https://(?:[a-zA-Z0-9-]+\.)?antigravity\.google(?:\.com)?/r/[^\s<>"'\u0000-\u001F]+""",
         RegexOption.IGNORE_CASE
     )
 
@@ -36,6 +36,6 @@ object RemoteControlUrlParser {
         val clean = stripAnsi(rawOutput)
         val match = REMOTE_URL_PATTERN.find(clean) ?: return null
         val trimmed = match.value.trimEnd(*TRAILING_PUNCTUATION)
-        return if (trimmed.contains(REMOTE_CONTROL_HOST, ignoreCase = true)) trimmed else null
+        return if (trimmed.contains("antigravity.google", ignoreCase = true)) trimmed else null
     }
 }

@@ -1,15 +1,21 @@
 package com.droidantigravity
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -25,10 +31,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
+import com.droidantigravity.antigravity.AntigravityStartupError
 import com.droidantigravity.antigravity.AntigravityStartupException
 import com.droidantigravity.core.AppState
 import com.droidantigravity.core.Result
 import com.droidantigravity.core.diagnostics.DiagnosticLogger
+import com.droidantigravity.core.diagnostics.DiagnosticSanitizer
 import com.droidantigravity.diagnostics.ExportLogManager
 import com.droidantigravity.web.AntigravityWebView
 import com.droidantigravity.terminal.PtyTerminalSession
@@ -64,6 +72,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var floatingTerminalButton: Button
     private var terminalSession: PtyTerminalSession? = null
     @Volatile private var currentRemoteControlUrl: String? = null
+
+    // Touch-optimized authorization code UI
+    private lateinit var authContainer: LinearLayout
+    private lateinit var authInstructions: TextView
+    private lateinit var openBrowserButton: Button
+    private lateinit var authCodeInput: EditText
+    private lateinit var authActionsRow: LinearLayout
+    private lateinit var pasteButton: Button
+    private lateinit var clearButton: Button
+    private lateinit var submitCodeButton: Button
+    @Volatile private var activeAuthUrl: String? = null
+    @Volatile private var hasAutoOpenedBrowser = false
 
     @Volatile private var activeDiagnosticId: String? = null
 
@@ -244,10 +264,105 @@ class MainActivity : AppCompatActivity() {
             ).apply { gravity = Gravity.CENTER }
         )
 
+        // ----------------------------------------------------
+        // Authorization Code Entry UI (Real CLI Remote Control)
+        // ----------------------------------------------------
+        authContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            val padH = (16 * density).toInt()
+            val padV = (8 * density).toInt()
+            setPadding(padH, padV, padH, padV)
+            visibility = View.GONE
+        }
+
+        authInstructions = TextView(this).apply {
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, (12 * density).toInt())
+            text = "Complete authentication in your browser, then copy the authorization code and paste it below:"
+        }
+
+        openBrowserButton = createStyledButton("Open Authentication in Browser", Color.parseColor("#1A73E8")) {
+            openAuthBrowser(activeAuthUrl)
+        }.apply {
+            val padH = (20 * density).toInt()
+            val padV = (10 * density).toInt()
+            setPadding(padH, padV, padH, padV)
+        }
+
+        authCodeInput = EditText(this).apply {
+            hint = "Paste authorization code here"
+            setHintTextColor(Color.parseColor("#757580"))
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            typeface = Typeface.MONOSPACE
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            val bg = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 8f * density
+                setColor(Color.parseColor("#18181E"))
+                setStroke((1.5f * density).toInt(), Color.parseColor("#3E3E4C"))
+            }
+            background = bg
+            val padH = (14 * density).toInt()
+            val padV = (12 * density).toInt()
+            setPadding(padH, padV, padH, padV)
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    submitAuthCode(text.toString())
+                    true
+                } else false
+            }
+        }
+
+        authActionsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, (6 * density).toInt(), 0, (8 * density).toInt())
+        }
+
+        pasteButton = createStyledButton("Paste", Color.parseColor("#37474F")) {
+            pasteAuthCode()
+        }
+
+        clearButton = createStyledButton("Clear", Color.parseColor("#2E2E36")) {
+            authCodeInput.setText("")
+        }
+
+        submitCodeButton = createStyledButton("Submit Code", Color.parseColor("#00C853")) {
+            submitAuthCode(authCodeInput.text.toString())
+        }
+
+        val authBtnMargin = (6 * density).toInt()
+        val authBtnLp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(authBtnMargin, 0, authBtnMargin, 0) }
+
+        authActionsRow.addView(pasteButton, authBtnLp)
+        authActionsRow.addView(clearButton, authBtnLp)
+        authActionsRow.addView(submitCodeButton, authBtnLp)
+
+        val inputLp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            setMargins(0, (12 * density).toInt(), 0, (8 * density).toInt())
+        }
+
+        authContainer.addView(authInstructions)
+        authContainer.addView(openBrowserButton)
+        authContainer.addView(authCodeInput, inputLp)
+        authContainer.addView(authActionsRow)
+
         statusContainer.addView(progress)
         statusContainer.addView(statusTitle)
         statusContainer.addView(statusText)
         statusContainer.addView(diagnosticIdText)
+        statusContainer.addView(authContainer)
         statusContainer.addView(buttonScrollView)
 
         terminalContainer = FrameLayout(this).apply {
@@ -358,7 +473,12 @@ class MainActivity : AppCompatActivity() {
 
                     is AppState.AuthenticationRequired -> {
                         activeDiagnosticId = state.operationId
-                        showAuthenticationRequired(state.message, state.operationId)
+                        showAuthenticationRequired(state.authUrl, state.message, state.operationId)
+                    }
+
+                    is AppState.Authenticating -> {
+                        activeDiagnosticId = state.operationId
+                        showStatus(state.message, showProgress = true)
                     }
 
                     is AppState.AntigravityFailed -> {
@@ -395,16 +515,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startRuntime() {
+        hasAutoOpenedBrowser = false
+        activeAuthUrl = null
         lifecycleScope.launch {
             showStatus("Starting Antigravity…", showProgress = true)
             when (val result = runtimeController.startAll()) {
                 is Result.Success -> showWebView(result.data)
                 is Result.Failure -> {
                     val ex = result.error
-                    val opId = (ex as? AntigravityStartupException)?.operationId
+                    val startupEx = ex as? AntigravityStartupException
+                    val opId = startupEx?.operationId
                     activeDiagnosticId = opId
-                    if ((ex as? AntigravityStartupException)?.error == com.droidantigravity.antigravity.AntigravityStartupError.AUTH_REQUIRED) {
+                    if (startupEx?.error == AntigravityStartupError.AUTH_REQUIRED) {
                         showAuthenticationRequired(
+                            authUrl = startupEx.authUrl ?: runtimeController.getAuthUrl(),
                             message = ex.message ?: "Authentication required to use Antigravity",
                             diagnosticId = opId
                         )
@@ -427,14 +551,14 @@ class MainActivity : AppCompatActivity() {
                 is Result.Success -> showWebView(result.data)
                 is Result.Failure -> {
                     val ex = result.error
-                    val opId = (ex as? AntigravityStartupException)?.operationId
+                    val startupEx = ex as? AntigravityStartupException
+                    val opId = startupEx?.operationId
                     activeDiagnosticId = opId
-                    if ((ex as? AntigravityStartupException)?.error ==
-                        com.droidantigravity.antigravity.AntigravityStartupError.AUTH_REQUIRED
-                    ) {
+                    if (startupEx?.error == AntigravityStartupError.AUTH_REQUIRED) {
                         showAuthenticationRequired(
-                            ex.message ?: "Authentication is still required.",
-                            opId
+                            authUrl = startupEx.authUrl ?: runtimeController.getAuthUrl(),
+                            message = ex.message ?: "Authentication is still required.",
+                            diagnosticId = opId
                         )
                     } else {
                         showError(
@@ -459,6 +583,9 @@ class MainActivity : AppCompatActivity() {
             statusContainer.visibility = View.GONE
             buttonRow.visibility = View.GONE
             terminalContainer.visibility = View.GONE
+            authContainer.visibility = View.GONE
+            hasAutoOpenedBrowser = false
+            authCodeInput.setText("")
             floatingTerminalButton.visibility = View.VISIBLE
             webContainer.visibility = View.VISIBLE
 
@@ -550,6 +677,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             webContainer.visibility = View.GONE
             statusContainer.visibility = View.VISIBLE
+            authContainer.visibility = View.GONE
             progress.visibility = if (showProgress) View.VISIBLE else View.GONE
             statusTitle.visibility = View.GONE
             diagnosticIdText.visibility = View.GONE
@@ -562,51 +690,131 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showAuthenticationRequired(message: String, diagnosticId: String?) {
+    private fun showAuthenticationRequired(authUrl: String?, message: String, diagnosticId: String?) {
         runOnUiThread {
+            activeAuthUrl = authUrl ?: runtimeController.getAuthUrl()
             webContainer.visibility = View.GONE
             statusContainer.visibility = View.VISIBLE
             progress.visibility = View.GONE
-            statusTitle.text = "Google Sign In Required"
+            statusTitle.text = "Authorization Required"
             statusTitle.visibility = View.VISIBLE
-            statusText.text = "$message\n\nThe official Google OAuth flow is being opened in your Android browser. Complete sign-in there; DroidAntigravity will continue to Remote Control automatically."
+            statusText.text = "$message\n\nComplete authentication in your browser. Then paste the authorization code below to establish your Remote Control session."
             if (!diagnosticId.isNullOrBlank()) {
                 diagnosticIdText.text = "Diagnostic ID: $diagnosticId"
                 diagnosticIdText.visibility = View.VISIBLE
             } else {
                 diagnosticIdText.visibility = View.GONE
             }
+
+            // Expose the clean authorization code entry UI
+            authContainer.visibility = View.VISIBLE
+            authCodeInput.isEnabled = true
+            submitCodeButton.isEnabled = true
+
             buttonRow.visibility = View.VISIBLE
-            retryButton.visibility = View.VISIBLE
+            retryButton.visibility = View.GONE
             viewLogsButton.visibility = View.VISIBLE
             exportLogsButton.visibility = View.VISIBLE
             terminalButton.visibility = View.VISIBLE
-            openAntigravityAuthBrowserWhenReady()
+
+            val targetUrl = activeAuthUrl
+            if (!targetUrl.isNullOrBlank() && !hasAutoOpenedBrowser) {
+                hasAutoOpenedBrowser = true
+                openAuthBrowser(targetUrl)
+            } else if (targetUrl.isNullOrBlank()) {
+                watchForAuthUrl()
+            }
         }
     }
 
-    private fun openAntigravityAuthBrowserWhenReady() {
+    private fun openAuthBrowser(url: String?) {
+        val targetUrl = url ?: activeAuthUrl ?: runtimeController.getAuthUrl()
+        if (!targetUrl.isNullOrBlank() && (targetUrl.startsWith("http://") || targetUrl.startsWith("https://"))) {
+            DiagnosticLogger.i(TAG, "AUTH_BROWSER_OPEN", "Opening authorization URL in Android browser: ${DiagnosticSanitizer.redact(targetUrl)}")
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
+            } catch (e: Exception) {
+                DiagnosticLogger.e(TAG, "AUTH_BROWSER_FAILED", "Failed to launch browser: ${e.message}", e)
+                Toast.makeText(this, "Unable to open browser", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(this, "Waiting for authentication URL from Antigravity…", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun watchForAuthUrl() {
         lifecycleScope.launch {
             val paths = com.droidantigravity.core.AppPaths.getInstance(this@MainActivity)
-            val deadline = SystemClock.uptimeMillis() + 30_000L
+            val deadline = SystemClock.uptimeMillis() + 20_000L
             while (SystemClock.uptimeMillis() < deadline && !isFinishing) {
-                val file = paths.antigravityBrowserUrlFile
-                if (file.exists()) {
-                    val url = runCatching { file.readText().trim() }.getOrDefault("")
-                    if (url.startsWith("http://") || url.startsWith("https://")) {
-                        DiagnosticLogger.i(TAG, "AUTH_BROWSER_OPEN", "Opening official CLI OAuth URL in Android browser")
-                        runCatching {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        }.onFailure {
-                            DiagnosticLogger.e(TAG, "AUTH_BROWSER_OPEN_FAILED", "Unable to open OAuth URL: ${it.message}", it)
-                        }
-                        file.delete()
-                        // Keep the CLI watcher alive while the user completes OAuth.
-                        continueAuthentication()
-                        return@launch
+                val url = runtimeController.getAuthUrl()
+                    ?: if (paths.antigravityBrowserUrlFile.exists()) {
+                        runCatching { paths.antigravityBrowserUrlFile.readText().trim() }.getOrNull()
+                    } else null
+
+                if (!url.isNullOrBlank() && (url.startsWith("http://") || url.startsWith("https://"))) {
+                    activeAuthUrl = url
+                    if (!hasAutoOpenedBrowser) {
+                        hasAutoOpenedBrowser = true
+                        openAuthBrowser(url)
+                    }
+                    return@launch
+                }
+                delay(200)
+            }
+        }
+    }
+
+    private fun pasteAuthCode() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        val clip = clipboard?.primaryClip
+        if (clip != null && clip.itemCount > 0) {
+            val text = clip.getItemAt(0).text?.toString()?.trim()
+            if (!text.isNullOrBlank()) {
+                authCodeInput.setText(text)
+                authCodeInput.setSelection(text.length)
+                Toast.makeText(this, "Pasted from clipboard", Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+        Toast.makeText(this, "Clipboard is empty", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun submitAuthCode(code: String) {
+        val trimmed = code.trim()
+        if (trimmed.isEmpty()) {
+            Toast.makeText(this, "Please enter or paste the authorization code", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch {
+            authContainer.visibility = View.VISIBLE
+            submitCodeButton.isEnabled = false
+            authCodeInput.isEnabled = false
+            progress.visibility = View.VISIBLE
+            statusText.text = "Submitting authorization code to Antigravity…"
+
+            // Hide software keyboard
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.hideSoftInputFromWindow(authCodeInput.windowToken, 0)
+
+            when (val result = runtimeController.submitAuthorizationCode(trimmed)) {
+                is Result.Success -> {
+                    // Ready state triggers showWebView(result.data) automatically via observeRuntime
+                }
+                is Result.Failure -> {
+                    submitCodeButton.isEnabled = true
+                    authCodeInput.isEnabled = true
+                    progress.visibility = View.GONE
+                    val ex = result.error
+                    val opId = (ex as? AntigravityStartupException)?.operationId
+                    activeDiagnosticId = opId
+                    if ((ex as? AntigravityStartupException)?.error == AntigravityStartupError.AUTH_REQUIRED) {
+                        statusText.text = "The authorization code was not accepted. Please open the browser to re-authenticate and try again."
+                    } else {
+                        showError("Authentication Failed", ex.message ?: "Failed to authenticate with Antigravity", opId)
                     }
                 }
-                delay(100)
             }
         }
     }
@@ -615,6 +823,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             webContainer.visibility = View.GONE
             statusContainer.visibility = View.VISIBLE
+            authContainer.visibility = View.GONE
             progress.visibility = View.GONE
             statusTitle.text = title
             statusTitle.visibility = View.VISIBLE

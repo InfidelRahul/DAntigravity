@@ -131,7 +131,8 @@ class RuntimeController private constructor(private val context: Context) {
                     val startupEx = error as? com.droidantigravity.antigravity.AntigravityStartupException
                     if (startupEx?.error == com.droidantigravity.antigravity.AntigravityStartupError.AUTH_REQUIRED) {
                         _appState.value = AppState.AuthenticationRequired(
-                            error.message ?: "Google authentication required to enable Antigravity Remote Control",
+                            authUrl = startupEx.authUrl ?: antigravityManager.currentAuthUrl(),
+                            message = error.message ?: "Authentication required to enable Antigravity Remote Control",
                             operationId = failureOpId
                         )
                     } else {
@@ -261,6 +262,44 @@ class RuntimeController private constructor(private val context: Context) {
         linuxRuntime.executeStreaming(command, onOutput)
     }
 
+    fun getAuthUrl(): String? = antigravityManager.currentAuthUrl()
+
+    suspend fun submitAuthorizationCode(code: String): Result<String> =
+        mutex.withLock {
+            withContext(Dispatchers.IO) {
+                val opId = DiagnosticLogger.createOperationId("AGY_AUTH_SUBMIT")
+                _appState.value = AppState.Authenticating("Verifying authorization code with Antigravity…", opId)
+                log("[Antigravity] Submitting authorization code to CLI stdin.")
+
+                val result = antigravityManager.submitAuthorizationCode(code)
+                if (result is Result.Success) {
+                    val url = result.data
+                    _appState.value = AppState.Ready(url, "Antigravity")
+                    log("[Antigravity] Remote Control is ready.")
+                } else {
+                    val error = result.exceptionOrNull()!!
+                    val failureOpId = (error as? com.droidantigravity.antigravity.AntigravityStartupException)?.operationId ?: opId
+                    DiagnosticLogger.e(TAG, "auth_code_submit_failed", "Authentication code verification failed: ${error.message}", error, operationId = failureOpId)
+
+                    val startupEx = error as? com.droidantigravity.antigravity.AntigravityStartupException
+                    _appState.value = if (startupEx?.error == com.droidantigravity.antigravity.AntigravityStartupError.AUTH_REQUIRED) {
+                        AppState.AuthenticationRequired(
+                            authUrl = startupEx.authUrl ?: antigravityManager.currentAuthUrl(),
+                            message = error.message ?: "Authentication code was not accepted. Please verify and try again.",
+                            operationId = failureOpId
+                        )
+                    } else {
+                        AppState.AntigravityFailed(
+                            error.message ?: "Authentication failed",
+                            error,
+                            operationId = failureOpId
+                        )
+                    }
+                }
+                result
+            }
+        }
+
     fun takeAntigravityAuthenticationPty(): IntArray? =
         antigravityManager.takeInteractivePty()
 
@@ -277,7 +316,11 @@ class RuntimeController private constructor(private val context: Context) {
                             (error as? com.droidantigravity.antigravity.AntigravityStartupException)?.error ==
                             com.droidantigravity.antigravity.AntigravityStartupError.AUTH_REQUIRED
                         ) {
-                            AppState.AuthenticationRequired(error.message ?: "Authentication is still required.", opId)
+                            AppState.AuthenticationRequired(
+                                authUrl = (error as? com.droidantigravity.antigravity.AntigravityStartupException)?.authUrl ?: antigravityManager.currentAuthUrl(),
+                                message = error.message ?: "Authentication is still required.",
+                                operationId = opId
+                            )
                         } else {
                             AppState.AntigravityFailed(error.message ?: "Unable to continue Antigravity authentication.", error, opId)
                         }
