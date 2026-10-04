@@ -1,6 +1,7 @@
 package com.droidantigravity.antigravity
 
-import android.net.Uri
+import java.net.URI
+import java.net.URL
 
 /**
  * Parser for detecting and validating candidate authentication URLs emitted by the
@@ -36,13 +37,27 @@ object AuthenticationUrlParser {
      */
     fun isAuthenticationUrl(url: String): Boolean {
         return runCatching {
-            val uri = Uri.parse(url)
-            val scheme = uri.scheme?.lowercase() ?: return false
-            if (scheme != "https" && scheme != "http") return false
+            val scheme: String?
+            val host: String?
+            val path: String
+            val query: String
 
-            val host = uri.host?.lowercase() ?: return false
-            val path = uri.path?.lowercase().orEmpty()
-            val query = uri.query?.lowercase().orEmpty()
+            val uri = runCatching { URI(url) }.getOrNull()
+            if (uri != null && uri.host != null) {
+                scheme = uri.scheme?.lowercase()
+                host = uri.host?.lowercase()
+                path = (uri.rawPath ?: uri.path).orEmpty().lowercase()
+                query = (uri.rawQuery ?: uri.query).orEmpty().lowercase()
+            } else {
+                val u = URL(url)
+                scheme = u.protocol.lowercase()
+                host = u.host.lowercase()
+                path = u.path.orEmpty().lowercase()
+                query = u.query.orEmpty().lowercase()
+            }
+
+            if (scheme != "https" && scheme != "http") return false
+            if (host.isNullOrBlank()) return false
 
             // Exclude Remote Control session URLs
             if ((host == "antigravity.google.com" || host == "antigravity.google" || host.endsWith(".antigravity.google")) &&

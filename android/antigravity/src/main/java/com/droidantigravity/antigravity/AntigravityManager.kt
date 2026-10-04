@@ -703,24 +703,6 @@ class AntigravityManager internal constructor(
                     operationId = operationId
                 )
                 if (!authenticationAlreadyHandled) {
-                    // If auth URL has not been detected yet, give a brief 3s window to capture it
-                    var authUrl = currentAuthUrl
-                    if (authUrl == null) {
-                        val waitDeadline = System.currentTimeMillis() + 3000L
-                        while (System.currentTimeMillis() < waitDeadline && authUrl == null) {
-                            val curText = if (log.exists()) runCatching { log.readText() }.getOrDefault("") else ""
-                            val curStderr = if (stderrLog.exists()) runCatching { stderrLog.readText() }.getOrDefault("") else ""
-                            authUrl = AuthenticationUrlParser.extractAuthUrl(curText)
-                                ?: AuthenticationUrlParser.extractAuthUrl(curStderr)
-                                ?: readBrowserBridgeUrl()
-                            if (authUrl != null) {
-                                currentAuthUrl = authUrl
-                                break
-                            }
-                            delay(100)
-                        }
-                    }
-
                     _state.set(AntigravityState.AUTHENTICATION_REQUIRED)
                     throw AntigravityStartupException(
                         error = AntigravityStartupError.AUTH_REQUIRED,

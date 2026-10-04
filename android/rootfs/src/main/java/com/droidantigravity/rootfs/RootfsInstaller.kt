@@ -573,8 +573,8 @@ class RootfsInstaller(private val context: Context) {
                 export USER=user
                 export LOGNAME=user
                 export HOME=/home/user
-                if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
-                    . "$HOME/.bashrc"
+                if [ -n "${'$'}BASH_VERSION" ] && [ -f "${'$'}HOME/.bashrc" ]; then
+                    . "${'$'}HOME/.bashrc"
                 fi
                 """.trimIndent() + "\n"
             )
@@ -713,8 +713,8 @@ class RootfsInstaller(private val context: Context) {
             |export USER=user
             |export LOGNAME=user
             |export HOME=/home/user
-            |if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
-            |    . "$HOME/.bashrc"
+            |if [ -n "${'$'}BASH_VERSION" ] && [ -f "${'$'}HOME/.bashrc" ]; then
+            |    . "${'$'}HOME/.bashrc"
             |fi
             |EOF
             |    chown user:user /home/user/.profile || true
