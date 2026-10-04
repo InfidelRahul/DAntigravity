@@ -281,11 +281,10 @@ class AntigravityManager internal constructor(
         sensibleBrowser.setExecutable(true, false)
 
         // Keep the command itself in a guest script. This avoids nested shell
-        // quoting errors and guarantees that dbus-run-session + gnome-keyring
-        // run as uid 1000 instead of PRoot's synthetic uid 0.
-        launcherScript.writeText("#!/bin/bash\nset -e\nexport PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nexport BROWSER='$browserBridge'\nexport XDG_RUNTIME_DIR=/tmp/droidantigravity-runtime-1000\nmkdir -p \"\$XDG_RUNTIME_DIR\"\nchmod 700 \"\$XDG_RUNTIME_DIR\"\nexec dbus-run-session -- /bin/bash -lc 'eval \"\$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)\"; exec $agyBin --remote-control'\n")
+        // quoting errors and guarantees clean environment isolation.
+        launcherScript.writeText("#!/bin/bash\nset -e\nexport HOME=/home/user\nexport USER=user\nexport LOGNAME=user\nexport PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nexport BROWSER='$browserBridge'\nexport XDG_RUNTIME_DIR=/tmp/droidantigravity-runtime-1000\nmkdir -p \"\$XDG_RUNTIME_DIR\"\nchmod 700 \"\$XDG_RUNTIME_DIR\"\nexec dbus-run-session -- /bin/bash -lc 'eval \"\$(gnome-keyring-daemon --start --components=secrets 2>/dev/null)\"; exec $agyBin --remote-control'\n")
         launcherScript.setExecutable(true, false)
-        val guestCommand = "exec su - user -s /bin/bash -c '${launcherScript.absolutePath}'"
+        val guestCommand = "exec /bin/bash '${launcherScript.absolutePath}'"
         val guestCwd = paths.guestHomePath
         val guestPath = "/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 

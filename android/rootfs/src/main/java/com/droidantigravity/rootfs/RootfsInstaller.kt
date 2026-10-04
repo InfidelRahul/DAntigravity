@@ -563,16 +563,37 @@ class RootfsInstaller(private val context: Context) {
         val userProjects = File(userHome, "projects")
         ensureDirTraversable(userProjects)
 
-        // User profile
+        // User profile & bashrc
         val userProfile = File(userHome, ".profile")
         if (!userProfile.exists()) {
             userProfile.writeText(
                 """
-                export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+                export PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
                 export LANG=C.UTF-8
+                export USER=user
+                export LOGNAME=user
+                export HOME=/home/user
+                if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
+                    . "$HOME/.bashrc"
+                fi
                 """.trimIndent() + "\n"
             )
             userProfile.setReadable(true, false)
+        }
+
+        val userBashrc = File(userHome, ".bashrc")
+        if (!userBashrc.exists()) {
+            userBashrc.writeText(
+                """
+                if [ -f /etc/bash.bashrc ]; then
+                    . /etc/bash.bashrc
+                fi
+                export PS1='user@localhost:\w\$ '
+                alias ls='ls --color=auto'
+                alias ll='ls -la'
+                """.trimIndent() + "\n"
+            )
+            userBashrc.setReadable(true, false)
         }
 
         // Root profile
@@ -689,8 +710,26 @@ class RootfsInstaller(private val context: Context) {
             |    cat <<'EOF' > /home/user/.profile
             |export PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             |export LANG=C.UTF-8
+            |export USER=user
+            |export LOGNAME=user
+            |export HOME=/home/user
+            |if [ -n "$BASH_VERSION" ] && [ -f "$HOME/.bashrc" ]; then
+            |    . "$HOME/.bashrc"
+            |fi
             |EOF
             |    chown user:user /home/user/.profile || true
+            |fi
+            |
+            |if [ ! -f /home/user/.bashrc ]; then
+            |    cat <<'EOF' > /home/user/.bashrc
+            |if [ -f /etc/bash.bashrc ]; then
+            |    . /etc/bash.bashrc
+            |fi
+            |export PS1='user@localhost:\w\$ '
+            |alias ls='ls --color=auto'
+            |alias ll='ls -la'
+            |EOF
+            |    chown user:user /home/user/.bashrc || true
             |fi
             |
             |# 6. Mark bootstrap complete

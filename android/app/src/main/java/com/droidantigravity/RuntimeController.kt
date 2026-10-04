@@ -286,5 +286,14 @@ class RuntimeController private constructor(private val context: Context) {
             }
         }
 
+    suspend fun ensureLinuxStarted(): Result<Unit> = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            runCatchingResult {
+                ensureRootfs()
+                ensureLinux()
+            }
+        }
+    }
+
     fun isLinuxRunning(): Boolean = linuxRuntime.state.value.isRunning
 }

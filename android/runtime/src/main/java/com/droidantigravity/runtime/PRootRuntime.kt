@@ -145,9 +145,14 @@ open class PRootRuntime internal constructor(
     open fun buildInteractiveShellArgs(workingDir: String = "/home/user"): List<String> {
         val proot = getProotBinary()
         val rootfsPath = paths.rootfsDir.absolutePath
-        val shellSelector = "shell=\$(awk -F: '\$1==\"user\"{print \$7; exit}' /etc/passwd); " +
-            "[ -x \"\$shell\" ] || shell=/bin/bash; " +
-            "exec su - user -s \"\$shell\" -c 'export TERM=\"\$TERM\"; export COLORTERM=\"truecolor\"; exec \"\$SHELL\" -i -l'"
+        val shellSelector = "shell=\$(awk -F: '\$1==\"user\"{print \$7; exit}' /etc/passwd 2>/dev/null); " +
+            "[ -n \"\$shell\" ] && [ -x \"\$shell\" ] || shell=/bin/bash; " +
+            "[ -x \"\$shell\" ] || shell=/bin/sh; " +
+            "export SHELL=\"\$shell\" USER=user LOGNAME=user HOME=/home/user; " +
+            "export TERM=\"\${TERM:-xterm-256color}\" COLORTERM=\"\${COLORTERM:-truecolor}\"; " +
+            "export PS1='user@localhost:\\w\\$ '; " +
+            "cd /home/user 2>/dev/null || cd /; " +
+            "exec \"\$shell\" -l"
 
         return mutableListOf(
             proot.absolutePath,
@@ -168,7 +173,7 @@ open class PRootRuntime internal constructor(
      */
     fun spawnInteractiveShell(cols: Int = 80, rows: Int = 24): IntArray? {
         check(isInstalled()) { "Linux rootfs is not installed" }
-        check(_state.value == RuntimeState.RUNNING) { "Linux runtime is not running" }
+        check(_state.value.isReady || _state.value.isRunning) { "Linux runtime is not ready" }
         return NativeSpawn.spawnPtyInteractive(
             buildInteractiveShellArgs().toTypedArray(),
             buildEnvironment("/home/user"),
@@ -222,6 +227,7 @@ open class PRootRuntime internal constructor(
             "SHELL=/bin/bash",
             "PATH=/home/user/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "TERM=xterm-256color",
+            "COLORTERM=truecolor",
             "LANG=C.UTF-8",
             "DEBIAN_FRONTEND=noninteractive"
         )

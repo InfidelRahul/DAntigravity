@@ -47,7 +47,13 @@ class LinuxSecurityServices(private val linuxRuntime: PRootRuntime) {
         runCatchingResult {
             val command = """
                 set -e
-                su - user -s /bin/bash -c 'export XDG_RUNTIME_DIR=/tmp/droidantigravity-runtime-1000; mkdir -p "${'$'}XDG_RUNTIME_DIR"; chmod 700 "${'$'}XDG_RUNTIME_DIR"; dbus-run-session -- /bin/bash -lc "eval \"${'$'}(gnome-keyring-daemon --start --components=secrets 2>/dev/null)\"; dbus-send --session --dest=org.freedesktop.secrets --type=method_call --print-reply /org/freedesktop/secrets org.freedesktop.DBus.Introspectable.Introspect >/dev/null"'
+                export HOME=/home/user
+                export USER=user
+                export LOGNAME=user
+                export XDG_RUNTIME_DIR=/tmp/droidantigravity-runtime-1000
+                mkdir -p "${'$'}XDG_RUNTIME_DIR"
+                chmod 700 "${'$'}XDG_RUNTIME_DIR"
+                dbus-run-session -- /bin/bash -lc "eval \"${'$'}(gnome-keyring-daemon --start --components=secrets 2>/dev/null)\"; dbus-send --session --dest=org.freedesktop.secrets --type=method_call --print-reply /org/freedesktop/secrets org.freedesktop.DBus.Introspectable.Introspect >/dev/null"
             """.trimIndent()
             linuxRuntime.executeStreaming(command) { output ->
                 AvsLogger.d(TAG, output.trim())

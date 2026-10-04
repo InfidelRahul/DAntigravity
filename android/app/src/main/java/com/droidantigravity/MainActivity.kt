@@ -124,10 +124,13 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
+        val density = resources.displayMetrics.density
+
         statusContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(48, 48, 48, 48)
+            val pad = (24 * density).toInt()
+            setPadding(pad, pad, pad, pad)
             setBackgroundColor(Color.BLACK)
         }
 
@@ -138,7 +141,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setPadding(0, 24, 0, 12)
+            setPadding(0, (12 * density).toInt(), 0, (8 * density).toInt())
             visibility = View.GONE
         }
 
@@ -146,7 +149,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(Color.LTGRAY)
             textSize = 15f
             gravity = Gravity.CENTER
-            setPadding(0, 16, 0, 16)
+            setPadding(0, (10 * density).toInt(), 0, (10 * density).toInt())
             text = "Starting Linux environment…"
         }
 
@@ -155,69 +158,97 @@ class MainActivity : AppCompatActivity() {
             textSize = 13f
             typeface = Typeface.MONOSPACE
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 24)
+            setPadding(0, 0, 0, (16 * density).toInt())
             visibility = View.GONE
+        }
+
+        val buttonScrollView = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
         }
 
         buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, 16, 0, 0)
+            val padV = (16 * density).toInt()
+            setPadding(0, padV, 0, 0)
             visibility = View.GONE
         }
 
-        retryButton = Button(this).apply {
-            text = "Retry"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#1976D2"))
-            setOnClickListener {
-                if (runtimeController.appState.value is AppState.AuthenticationRequired) {
-                    continueAuthentication()
-                } else {
-                    startRuntime()
+        fun createStyledButton(label: String, bgColor: Int, textColor: Int = Color.WHITE, onClick: () -> Unit): Button {
+            return Button(this).apply {
+                text = label
+                setTextColor(textColor)
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                isAllCaps = false
+                stateListAnimator = null
+                val bg = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                    cornerRadius = 8f * density
+                    setColor(bgColor)
                 }
+                background = bg
+                val padH = (16 * density).toInt()
+                val padBtnV = (10 * density).toInt()
+                setPadding(padH, padBtnV, padH, padBtnV)
+                minHeight = (42 * density).toInt()
+                setOnClickListener { onClick() }
             }
         }
 
-        viewLogsButton = Button(this).apply {
-            text = "View Logs"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#37474F"))
-            setOnClickListener {
-                LogViewerDialog(this@MainActivity).show()
+        retryButton = createStyledButton("Retry", Color.parseColor("#1976D2")) {
+            if (runtimeController.appState.value is AppState.AuthenticationRequired) {
+                continueAuthentication()
+            } else {
+                startRuntime()
             }
         }
 
-        exportLogsButton = Button(this).apply {
-            text = "Export Logs"
-            setTextColor(Color.BLACK)
-            setBackgroundColor(Color.parseColor("#26A69A"))
-            setOnClickListener { exportDiagnosticBundle() }
+        viewLogsButton = createStyledButton("View Logs", Color.parseColor("#37474F")) {
+            LogViewerDialog(this@MainActivity).show()
         }
 
-        terminalButton = Button(this).apply {
-            text = "Terminal"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#242428"))
-            visibility = View.GONE
-            setOnClickListener { showTerminal() }
+        exportLogsButton = createStyledButton("Export Logs", Color.parseColor("#00897B")) {
+            exportDiagnosticBundle()
         }
 
+        terminalButton = createStyledButton("Terminal", Color.parseColor("#25252D")) {
+            showTerminal()
+        }.apply {
+            val bg = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = 8f * density
+                setColor(Color.parseColor("#25252D"))
+                setStroke((1.5f * density).toInt(), Color.parseColor("#4B4B58"))
+            }
+            background = bg
+        }
+
+        val btnMargin = (6 * density).toInt()
         val btnLp = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { setMargins(8, 0, 8, 0) }
+        ).apply { setMargins(btnMargin, 0, btnMargin, 0) }
 
         buttonRow.addView(retryButton, btnLp)
         buttonRow.addView(viewLogsButton, btnLp)
         buttonRow.addView(exportLogsButton, btnLp)
         buttonRow.addView(terminalButton, btnLp)
 
+        buttonScrollView.addView(
+            buttonRow,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.CENTER }
+        )
+
         statusContainer.addView(progress)
         statusContainer.addView(statusTitle)
         statusContainer.addView(statusText)
         statusContainer.addView(diagnosticIdText)
-        statusContainer.addView(buttonRow)
+        statusContainer.addView(buttonScrollView)
 
         terminalContainer = FrameLayout(this).apply {
             visibility = View.GONE
@@ -240,20 +271,34 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
-        // A small native control keeps the official Antigravity WebView untouched
-        // while making the independent Linux terminal reachable at any time.
+        // Native floating control to open the Linux terminal anytime
+        val fabSize = (56 * density).toInt()
+        val marginEnd = (20 * density).toInt()
+        val marginBottom = (24 * density).toInt()
+
         floatingTerminalButton = Button(this).apply {
-            text = "⌘"
+            text = ">_"
             textSize = 16f
+            typeface = Typeface.MONOSPACE
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#242428"))
+            isAllCaps = false
+            stateListAnimator = null
+            val bg = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Color.parseColor("#1E1E24"))
+                setStroke((1.5f * density).toInt(), Color.parseColor("#4B4B58"))
+            }
+            background = bg
+            elevation = 10f * density
+            setPadding(0, 0, 0, 0)
             visibility = View.GONE
+            contentDescription = "Open Linux Terminal"
             setOnClickListener { showTerminal() }
         }
         root.addView(
             floatingTerminalButton,
-            FrameLayout.LayoutParams(52, 52, Gravity.BOTTOM or Gravity.END).apply {
-                setMargins(0, 0, 18, 24)
+            FrameLayout.LayoutParams(fabSize, fabSize, Gravity.BOTTOM or Gravity.END).apply {
+                setMargins(0, 0, marginEnd, marginBottom)
             }
         )
 
@@ -427,48 +472,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showTerminal() {
-        if (!runtimeController.isLinuxRunning()) {
-            Toast.makeText(this, "Linux userspace is not ready yet", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        webContainer.visibility = View.GONE
-        statusContainer.visibility = View.GONE
-        terminalContainer.visibility = View.VISIBLE
-        floatingTerminalButton.visibility = View.GONE
-
-        if (terminalSession == null || !terminalSession!!.isRunning()) {
-            terminalSession?.close()
-
-            val authenticationPty =
-                if (runtimeController.appState.value is AppState.AuthenticationRequired) {
-                    runtimeController.takeAntigravityAuthenticationPty()
-                } else {
-                    null
+        lifecycleScope.launch {
+            if (!runtimeController.isLinuxRunning()) {
+                showStatus("Starting Linux userspace for Terminal…", showProgress = true)
+                val startRes = runtimeController.ensureLinuxStarted()
+                if (startRes is Result.Failure) {
+                    showError("Linux failed to start", startRes.error.message ?: "Unable to start Linux runtime", null)
+                    return@launch
                 }
-
-            terminalSession = if (authenticationPty != null) {
-                PtyTerminalSession(runtimeController.linuxRuntime, authenticationPty)
-            } else {
-                PtyTerminalSession(runtimeController.linuxRuntime)
             }
 
-            val composeView = ComposeView(this).apply {
-                setContent {
-                    TerminalScreen(
-                        session = terminalSession!!,
-                        onClose = { hideTerminal() }
+            webContainer.visibility = View.GONE
+            statusContainer.visibility = View.GONE
+            terminalContainer.visibility = View.VISIBLE
+            floatingTerminalButton.visibility = View.GONE
+
+            if (terminalSession == null || !terminalSession!!.isRunning()) {
+                terminalSession?.close()
+                terminalSession = PtyTerminalSession(runtimeController.linuxRuntime)
+
+                val composeView = ComposeView(this@MainActivity).apply {
+                    setContent {
+                        TerminalScreen(
+                            session = terminalSession!!,
+                            onClose = { hideTerminal() }
+                        )
+                    }
+                }
+                terminalContainer.removeAllViews()
+                terminalContainer.addView(
+                    composeView,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
                     )
-                }
-            }
-            terminalContainer.removeAllViews()
-            terminalContainer.addView(
-                composeView,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
                 )
-            )
+            }
         }
     }
 
@@ -514,12 +553,11 @@ class MainActivity : AppCompatActivity() {
             progress.visibility = if (showProgress) View.VISIBLE else View.GONE
             statusTitle.visibility = View.GONE
             diagnosticIdText.visibility = View.GONE
-            val linuxReady = runtimeController.isLinuxRunning()
             retryButton.visibility = View.GONE
-            viewLogsButton.visibility = View.GONE
+            viewLogsButton.visibility = View.VISIBLE
             exportLogsButton.visibility = View.GONE
-            terminalButton.visibility = if (linuxReady) View.VISIBLE else View.GONE
-            buttonRow.visibility = if (linuxReady) View.VISIBLE else View.GONE
+            terminalButton.visibility = View.VISIBLE
+            buttonRow.visibility = View.VISIBLE
             statusText.text = message
         }
     }
@@ -542,7 +580,7 @@ class MainActivity : AppCompatActivity() {
             retryButton.visibility = View.VISIBLE
             viewLogsButton.visibility = View.VISIBLE
             exportLogsButton.visibility = View.VISIBLE
-            terminalButton.visibility = if (runtimeController.isLinuxRunning()) View.VISIBLE else View.GONE
+            terminalButton.visibility = View.VISIBLE
             openAntigravityAuthBrowserWhenReady()
         }
     }
@@ -591,7 +629,7 @@ class MainActivity : AppCompatActivity() {
             retryButton.visibility = View.VISIBLE
             viewLogsButton.visibility = View.VISIBLE
             exportLogsButton.visibility = View.VISIBLE
-            terminalButton.visibility = if (runtimeController.isLinuxRunning()) View.VISIBLE else View.GONE
+            terminalButton.visibility = View.VISIBLE
         }
     }
 
@@ -641,6 +679,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackHandling() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (terminalContainer.visibility == View.VISIBLE) {
+                    hideTerminal()
+                    return
+                }
                 if (browser.goBack()) return
                 finish()
             }

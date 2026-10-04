@@ -29,7 +29,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.connectbot.terminal.Terminal
@@ -62,6 +66,8 @@ fun TerminalScreen(
         )
     }
 
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     DisposableEffect(session) {
         onDispose { session.close() }
     }
@@ -72,6 +78,7 @@ fun TerminalScreen(
         // This avoids the initial blank/non-input state on Android 15/16.
         delay(100)
         focusRequester.requestFocus()
+        keyboardController?.show()
     }
 
     Surface(
@@ -122,6 +129,7 @@ fun TerminalScreen(
                     maxFontSize = 24.sp,
                     onTerminalTap = {
                         focusRequester.requestFocus()
+                        keyboardController?.show()
                     }
                 )
             }
@@ -133,6 +141,12 @@ fun TerminalScreen(
                     .padding(horizontal = 8.dp, vertical = 7.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                item {
+                    TerminalAction("⌨") {
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    }
+                }
                 item {
                     TerminalAction("Paste") {
                         pasteFromClipboard(context, session)
@@ -166,14 +180,17 @@ fun TerminalScreen(
 private fun TerminalAction(label: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        modifier = Modifier.size(width = 72.dp, height = 38.dp),
+        modifier = Modifier
+            .height(36.dp)
+            .defaultMinSize(minWidth = 44.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = Color(0xFF242428),
             contentColor = Color(0xFFE8E8EA)
         ),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+        shape = RoundedCornerShape(6.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp)
     ) {
-        Text(label, fontSize = 11.sp)
+        Text(label, fontSize = 12.sp, maxLines = 1)
     }
 }
 
